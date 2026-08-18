@@ -1515,29 +1515,6 @@ static UIColor *B3MResolvedBaseIconColor(void)
     return gB3MActiveIconColor ?: B3MFallbackIconColor();
 }
 
-static UIColor *B3MGlassBodyTintColor(UIView *view)
-{
-    UIColor *base = B3MResolvedBaseIconColor();
-
-    CGFloat h = 0.58, s = 0.42, v = 0.72, alpha = 1.0;
-    [base getHue:&h saturation:&s brightness:&v alpha:&alpha];
-
-    if (B3MUsesDarkAppearance(view)) {
-        // Dark glass may retain more chroma without flattening contrast.
-        s = MIN(0.58, MAX(0.22, s * 0.62));
-        v = MIN(0.78, MAX(0.48, v * 0.88));
-    } else {
-        /*
-         * Light mode needs a stable luminance floor for black text. Keep only
-         * a trace of the active icon hue and move the body tint close to white.
-         * The live backdrop still supplies the wallpaper/app colour.
-         */
-        s = MIN(0.10, MAX(0.035, s * 0.12));
-        v = 0.985;
-    }
-
-    return [UIColor colorWithHue:h saturation:s brightness:v alpha:1.0];
-}
 
 static UIColor *B3MGlassTextColorForView(UIView *view)
 {
