@@ -9,7 +9,10 @@ static CFStringRef const kB3MNotification = CFSTR("com.kulinichx.better3dmenus16
 static BOOL gB3MHideSeparators = YES;
 static BOOL gB3MReduceBlur = YES;
 static BOOL gB3MHideShareApp = YES;
+static BOOL gB3MHideRemoveApp = YES;
 static BOOL gB3MHideSectionGap = NO;
+static BOOL gB3MGlassMenuTint = NO;
+static BOOL gB3MGlassTextTint = NO;
 static CGFloat gB3MBlurFactor = 0.55;
 
 static char kB3MSeparatorCapturedKey;
@@ -17,6 +20,10 @@ static char kB3MSeparatorHiddenKey;
 static char kB3MSeparatorAlphaKey;
 static char kB3MBlurCapturedKey;
 static char kB3MBlurAlphaKey;
+static char kB3MTintCapturedKey;
+static char kB3MTintColorKey;
+static char kB3MTextCapturedKey;
+static char kB3MTextColorKey;
 
 static BOOL B3MReadBool(CFStringRef key, BOOL fallback)
 {
@@ -65,7 +72,10 @@ static void B3MLoadPreferences(void)
     gB3MHideSeparators = B3MReadBool(CFSTR("HideSeparators"), YES);
     gB3MReduceBlur = B3MReadBool(CFSTR("ReduceBlur"), YES);
     gB3MHideShareApp = B3MReadBool(CFSTR("HideShareApp"), YES);
+    gB3MHideRemoveApp = B3MReadBool(CFSTR("HideRemoveApp"), YES);
     gB3MHideSectionGap = B3MReadBool(CFSTR("HideSectionGap"), NO);
+    gB3MGlassMenuTint = B3MReadBool(CFSTR("GlassMenuTint"), NO);
+    gB3MGlassTextTint = B3MReadBool(CFSTR("GlassTextTint"), NO);
     gB3MBlurFactor = (CGFloat)B3MReadDouble(CFSTR("BlurFactor"), 0.55, 0.20, 1.00);
 }
 
@@ -154,6 +164,145 @@ static void B3MApplyBlurRecursively(UIView *view, BOOL backgroundAncestor)
     }
 }
 
+
+static UIColor *B3MGlassMenuColor(void)
+{
+    // Subtle cool-blue glass tint, intentionally low alpha.
+    return [UIColor colorWithRed:0.10 green:0.42 blue:0.82 alpha:0.11];
+}
+
+static UIColor *B3MGlassTextColor(void)
+{
+    // Icy cyan-white accent chosen to match the new glass "3" icon.
+    return [UIColor colorWithRed:0.73 green:0.90 blue:1.00 alpha:1.00];
+}
+
+static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
+{
+    if (!color) return NO;
+
+    UIColor *resolved = color;
+    if ([color respondsToSelector:@selector(resolvedColorWithTraitCollection:)]) {
+        resolved = [color resolvedColorWithTraitCollection:traits];
+    }
+
+    CGFloat r = 0.0, g = 0.0, b = 0.0, a = 0.0;
+    if (![resolved getRed:&r green:&g blue:&b alpha:&a]) {
+        return NO;
+    }
+
+    // Preserve system/destructive reds instead of recoloring them.
+    return (r > 0.65 && r > (g * 1.45) && r > (b * 1.25));
+}
+
+static void B3MApplyGlassTintRecursively(UIView *view, BOOL backgroundAncestor)
+{
+    if (!view) return;
+
+    BOOL isBackgroundBranch =
+        backgroundAncestor || B3MClassNameLooksLikeBackground(view);
+
+    if ([view isKindOfClass:UIVisualEffectView.class] && isBackgroundBranch) {
+        UIVisualEffectView *effectView = (UIVisualEffectView *)view;
+        UIView *contentView = effectView.contentView;
+
+        NSNumber *captured =
+            objc_getAssociatedObject(contentView, &kB3MTintCapturedKey);
+
+        if (gB3MGlassMenuTint) {
+            if (![captured boolValue]) {
+                UIColor *oldColor = contentView.backgroundColor;
+                objc_setAssociatedObject(
+                    contentView,
+                    &kB3MTintColorKey,
+                    oldColor ?: (id)[NSNull null],
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+                objc_setAssociatedObject(
+                    contentView,
+                    &kB3MTintCapturedKey,
+                    @YES,
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+            }
+
+            contentView.backgroundColor = B3MGlassMenuColor();
+        } else if ([captured boolValue]) {
+            id oldColor =
+                objc_getAssociatedObject(contentView, &kB3MTintColorKey);
+
+            contentView.backgroundColor =
+                (oldColor == [NSNull null]) ? nil : (UIColor *)oldColor;
+
+            objc_setAssociatedObject(
+                contentView, &kB3MTintCapturedKey, nil,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC
+            );
+            objc_setAssociatedObject(
+                contentView, &kB3MTintColorKey, nil,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC
+            );
+        }
+    }
+
+    for (UIView *subview in view.subviews) {
+        B3MApplyGlassTintRecursively(subview, isBackgroundBranch);
+    }
+}
+
+static void B3MApplyGlassTextRecursively(UIView *view)
+{
+    if (!view) return;
+
+    if ([view isKindOfClass:UILabel.class]) {
+        UILabel *label = (UILabel *)view;
+        NSNumber *captured =
+            objc_getAssociatedObject(label, &kB3MTextCapturedKey);
+
+        if (gB3MGlassTextTint) {
+            UIColor *current = label.textColor;
+
+            if (!B3MColorLooksDestructive(current, label.traitCollection)) {
+                if (![captured boolValue]) {
+                    objc_setAssociatedObject(
+                        label,
+                        &kB3MTextColorKey,
+                        current ?: (id)[NSNull null],
+                        OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                    );
+                    objc_setAssociatedObject(
+                        label,
+                        &kB3MTextCapturedKey,
+                        @YES,
+                        OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                    );
+                }
+
+                label.textColor = B3MGlassTextColor();
+            }
+        } else if ([captured boolValue]) {
+            id oldColor =
+                objc_getAssociatedObject(label, &kB3MTextColorKey);
+
+            label.textColor =
+                (oldColor == [NSNull null]) ? nil : (UIColor *)oldColor;
+
+            objc_setAssociatedObject(
+                label, &kB3MTextCapturedKey, nil,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC
+            );
+            objc_setAssociatedObject(
+                label, &kB3MTextColorKey, nil,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC
+            );
+        }
+    }
+
+    for (UIView *subview in view.subviews) {
+        B3MApplyGlassTextRecursively(subview);
+    }
+}
+
 static BOOL B3MActionIdentifierLooksLikeShareApp(NSString *identifier)
 {
     if (identifier.length == 0) return NO;
@@ -213,11 +362,89 @@ static BOOL B3MIsShareAppElement(UIMenuElement *element)
     return B3MTitleLooksLikeShareApp(action.title);
 }
 
+
+static BOOL B3MActionIdentifierLooksLikeRemoveApp(NSString *identifier)
+{
+    if (identifier.length == 0) return NO;
+
+    NSString *lower = identifier.lowercaseString;
+
+    static NSSet<NSString *> *knownIdentifiers;
+    static dispatch_once_t onceToken;
+
+    dispatch_once(&onceToken, ^{
+        knownIdentifiers = [NSSet setWithArray:@[
+            @"com.apple.springboard.application-shortcut-item.remove",
+            @"com.apple.springboard.application-shortcut-item.remove-app",
+            @"com.apple.springboard.application-shortcut-item.delete",
+            @"com.apple.springboard.application-shortcut-item.delete-app",
+            @"com.apple.springboardhome.application-shortcut-item.remove",
+            @"com.apple.springboardhome.application-shortcut-item.remove-app",
+            @"com.apple.springboardhome.application-shortcut-item.delete",
+            @"com.apple.springboardhome.application-shortcut-item.delete-app"
+        ]];
+    });
+
+    if ([knownIdentifiers containsObject:lower]) {
+        return YES;
+    }
+
+    BOOL springBoardOwned =
+        ([lower rangeOfString:@"springboard"].location != NSNotFound);
+    BOOL shortcutItem =
+        ([lower rangeOfString:@"application-shortcut-item"].location != NSNotFound);
+    BOOL removeOrDelete =
+        ([lower hasSuffix:@".remove"] ||
+         [lower hasSuffix:@".remove-app"] ||
+         [lower hasSuffix:@".delete"] ||
+         [lower hasSuffix:@".delete-app"]);
+
+    return springBoardOwned && shortcutItem && removeOrDelete;
+}
+
+static BOOL B3MTitleLooksLikeRemoveApp(NSString *title)
+{
+    if (title.length == 0) return NO;
+
+    static NSSet<NSString *> *knownTitles;
+    static dispatch_once_t onceToken;
+
+    dispatch_once(&onceToken, ^{
+        knownTitles = [NSSet setWithArray:@[
+            @"Remove App",
+            @"移除 App",
+            @"移除App"
+        ]];
+    });
+
+    return [knownTitles containsObject:title];
+}
+
+static BOOL B3MIsRemoveAppElement(UIMenuElement *element)
+{
+    if (!gB3MHideRemoveApp || ![element isKindOfClass:UIAction.class]) {
+        return NO;
+    }
+
+    UIAction *action = (UIAction *)element;
+    NSString *identifier = nil;
+
+    if ([action respondsToSelector:@selector(identifier)]) {
+        identifier = action.identifier;
+    }
+
+    if (B3MActionIdentifierLooksLikeRemoveApp(identifier)) {
+        return YES;
+    }
+
+    return B3MTitleLooksLikeRemoveApp(action.title);
+}
+
 static __thread BOOL gB3MInsideMenuRewrite = NO;
 
 static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> *children)
 {
-    if ((!gB3MHideShareApp && !gB3MHideSectionGap) || children.count == 0) {
+    if ((!gB3MHideShareApp && !gB3MHideRemoveApp && !gB3MHideSectionGap) || children.count == 0) {
         return children;
     }
 
@@ -227,7 +454,8 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
     BOOL changed = NO;
 
     for (UIMenuElement *element in children) {
-        if (B3MIsShareAppElement(element)) {
+        if (B3MIsShareAppElement(element) ||
+            B3MIsRemoveAppElement(element)) {
             changed = YES;
             continue;
         }
@@ -365,12 +593,14 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 {
     %orig;
     B3MApplyBlurRecursively((UIView *)self, YES);
+    B3MApplyGlassTintRecursively((UIView *)self, YES);
 }
 
 - (void)layoutSubviews
 {
     %orig;
     B3MApplyBlurRecursively((UIView *)self, YES);
+    B3MApplyGlassTintRecursively((UIView *)self, YES);
 }
 
 %end
@@ -381,12 +611,16 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 {
     %orig;
     B3MApplyBlurRecursively((UIView *)self, NO);
+    B3MApplyGlassTintRecursively((UIView *)self, NO);
+    B3MApplyGlassTextRecursively((UIView *)self);
 }
 
 - (void)layoutSubviews
 {
     %orig;
     B3MApplyBlurRecursively((UIView *)self, NO);
+    B3MApplyGlassTintRecursively((UIView *)self, NO);
+    B3MApplyGlassTextRecursively((UIView *)self);
 }
 
 %end
@@ -396,7 +630,7 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 + (instancetype)menuWithChildren:(NSArray<UIMenuElement *> *)children
 {
     if (gB3MInsideMenuRewrite ||
-        (!gB3MHideShareApp && !gB3MHideSectionGap)) {
+        (!gB3MHideShareApp && !gB3MHideRemoveApp && !gB3MHideSectionGap)) {
         return %orig;
     }
 
@@ -410,7 +644,7 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
                      children:(NSArray<UIMenuElement *> *)children
 {
     if (gB3MInsideMenuRewrite ||
-        (!gB3MHideShareApp && !gB3MHideSectionGap)) {
+        (!gB3MHideShareApp && !gB3MHideRemoveApp && !gB3MHideSectionGap)) {
         return %orig;
     }
 
@@ -427,7 +661,7 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
                      children:(NSArray<UIMenuElement *> *)children
 {
     if (gB3MInsideMenuRewrite ||
-        (!gB3MHideShareApp && !gB3MHideSectionGap)) {
+        (!gB3MHideShareApp && !gB3MHideRemoveApp && !gB3MHideSectionGap)) {
         return %orig;
     }
 
@@ -440,7 +674,7 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 - (instancetype)menuByReplacingChildren:(NSArray<UIMenuElement *> *)children
 {
     if (gB3MInsideMenuRewrite ||
-        (!gB3MHideShareApp && !gB3MHideSectionGap)) {
+        (!gB3MHideShareApp && !gB3MHideRemoveApp && !gB3MHideSectionGap)) {
         return %orig;
     }
 

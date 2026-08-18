@@ -14,7 +14,6 @@
 			<key>footerText</key>
 			<string>iOS 16 / RootHide compatibility build. Visual context-menu tweaks only; no Home Screen long-press timing hooks are used.</string>
 		</dict>
-
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
@@ -29,7 +28,6 @@
 			<key>PostNotification</key>
 			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 		</dict>
-
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
@@ -44,7 +42,6 @@
 			<key>PostNotification</key>
 			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 		</dict>
-
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
@@ -59,7 +56,20 @@
 			<key>PostNotification</key>
 			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 		</dict>
-
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>Hide Remove App</string>
+			<key>defaults</key>
+			<string>com.kulinichx.better3dmenus16rh</string>
+			<key>key</key>
+			<string>HideRemoveApp</string>
+			<key>default</key>
+			<true/>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
@@ -74,14 +84,49 @@
 			<key>PostNotification</key>
 			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 		</dict>
-
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Appearance</string>
+			<key>footerText</key>
+			<string>Glass colors are scoped to the iOS 16 Context Menu only. Destructive red labels are preserved.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>Glass Menu Tint</string>
+			<key>defaults</key>
+			<string>com.kulinichx.better3dmenus16rh</string>
+			<key>key</key>
+			<string>GlassMenuTint</string>
+			<key>default</key>
+			<false/>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>Glass Text Tint</string>
+			<key>defaults</key>
+			<string>com.kulinichx.better3dmenus16rh</string>
+			<key>key</key>
+			<string>GlassTextTint</string>
+			<key>default</key>
+			<false/>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Testing</string>
 			<key>footerText</key>
-			<string>v0.1.5 adds an experimental Hide Section Gap option. Faster Haptic Touch remains intentionally disabled until the iOS 16 Context Menu activation path is isolated safely.</string>
+			<string>v0.1.7 adds the new glass icon plus optional menu/text glass tint. Faster Haptic Touch remains disabled until its iOS 16 activation path is isolated safely.</string>
 		</dict>
 	</array>
 </dict>
