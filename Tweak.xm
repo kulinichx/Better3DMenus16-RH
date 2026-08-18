@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <math.h>
@@ -25,7 +26,7 @@ static char kB3MBlurCapturedKey;
 static char kB3MBlurAlphaKey;
 static char kB3MTextCapturedKey;
 static char kB3MTextColorKey;
-static char kB3MGlassOverlayKey;
+static char kB3MGlassMaterialKey;
 
 static BOOL B3MReadBool(CFStringRef key, BOOL fallback)
 {
@@ -173,10 +174,21 @@ static inline CGFloat B3MClamp01(CGFloat value)
 }
 
 /*
- * GlassFolders-inspired response curves.
- * Tint intentionally rises slower than material/edge response so Light Mode
- * does not become a milky white card.
+ * GlassFolders 1.0 response curves, kept separate on purpose:
+ * - Material rises slightly slower than linear.
+ * - Specular rises faster so edges read without an opaque body.
+ * - Tint rises slower so high strength does not become a milky card.
+ * - Edge has its own optical authority curve.
  */
+static inline CGFloat B3MMaterialResponse(CGFloat strength)
+{
+    return pow(B3MClamp01(strength), 1.10);
+}
+
+static inline CGFloat B3MSpecularResponse(CGFloat strength)
+{
+    return pow(B3MClamp01(strength), 0.80);
+}
 
 static inline CGFloat B3MTintResponse(CGFloat strength)
 {
@@ -191,18 +203,43 @@ static inline CGFloat B3MEdgeResponse(CGFloat strength)
 
 static BOOL B3MUsesDarkAppearance(UIView *view)
 {
-    if (!view) return NO;
+    UIUserInterfaceStyle style = UIUserInterfaceStyleUnspecified;
 
-    if (@available(iOS 12.0, *)) {
-        return view.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+    if (view) {
+        style = view.traitCollection.userInterfaceStyle;
     }
 
-    return NO;
+    if (style == UIUserInterfaceStyleUnspecified) {
+        style = UIScreen.mainScreen.traitCollection.userInterfaceStyle;
+    }
+
+    return style == UIUserInterfaceStyleDark;
+}
+
+/*
+ * Resolve CAFilter at runtime exactly like GlassFolders.
+ * This avoids linking private QuartzCore classes directly.
+ */
+static id B3MCreateCAFilter(NSString *type)
+{
+    Class filterClass = NSClassFromString(@"CAFilter");
+    SEL selector = NSSelectorFromString(@"filterWithType:");
+
+    if (!filterClass || ![filterClass respondsToSelector:selector]) {
+        return nil;
+    }
+
+    IMP imp = [filterClass methodForSelector:selector];
+    typedef id (*B3MFilterFactoryIMP)(id, SEL, id);
+    B3MFilterFactoryIMP func = (B3MFilterFactoryIMP)imp;
+
+    return func(filterClass, selector, type);
 }
 
 static UIColor *B3MFallbackIconColor(void)
 {
-    return [UIColor colorWithHue:0.58 saturation:0.58 brightness:0.78 alpha:1.0];
+    // Neutral cool fallback only when the current icon cannot be sampled.
+    return [UIColor colorWithHue:0.58 saturation:0.42 brightness:0.72 alpha:1.0];
 }
 
 static UIImage *B3MImageSnapshotFromIconView(UIView *view)
@@ -305,6 +342,7 @@ static UIColor *B3MDominantColorFromImage(UIImage *image)
         colorSpace,
         kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
     );
+
     CGColorSpaceRelease(colorSpace);
 
     if (!context) return B3MFallbackIconColor();
@@ -336,8 +374,6 @@ static UIColor *B3MDominantColorFromImage(UIImage *image)
         CGFloat brightness = maxC;
         CGFloat saturation = maxC > 0.001 ? delta / maxC : 0.0;
 
-        // Ignore near-neutral and extreme pixels so white icon backgrounds
-        // do not wash the extracted app hue toward gray.
         if (saturation < 0.16 || brightness < 0.12 || brightness > 0.97) {
             continue;
         }
@@ -399,8 +435,9 @@ static UIColor *B3MDominantColorFromImage(UIImage *image)
         return raw;
     }
 
-    s = MIN(0.90, MAX(0.42, s));
-    v = MIN(0.88, MAX(0.52, v));
+    // Keep the sampled hue, but normalize extreme icon colors before glass use.
+    s = MIN(0.86, MAX(0.34, s));
+    v = MIN(0.86, MAX(0.46, v));
 
     return [UIColor colorWithHue:h saturation:s brightness:v alpha:1.0];
 }
@@ -419,69 +456,41 @@ static UIColor *B3MResolvedBaseIconColor(void)
     return gB3MActiveIconColor ?: B3MFallbackIconColor();
 }
 
-static UIColor *B3MGlassBackgroundColorForView(UIView *view)
+static UIColor *B3MGlassBodyTintColor(UIView *view)
 {
     UIColor *base = B3MResolvedBaseIconColor();
 
-    CGFloat h = 0.58, s = 0.58, v = 0.78, alpha = 1.0;
+    CGFloat h = 0.58, s = 0.42, v = 0.72, alpha = 1.0;
     [base getHue:&h saturation:&s brightness:&v alpha:&alpha];
 
-    BOOL dark = B3MUsesDarkAppearance(view);
-    CGFloat strength = dark ? 0.72 : 0.55;
-    CGFloat tintDrive = B3MTintResponse(strength);
-
-    if (dark) {
-        s = MIN(0.88, MAX(0.42, s * 0.92));
-        v = MIN(0.82, MAX(0.52, v * 0.88));
-        alpha = 0.11 + 0.14 * tintDrive;
+    if (B3MUsesDarkAppearance(view)) {
+        // Dark glass may retain more chroma without flattening contrast.
+        s = MIN(0.58, MAX(0.22, s * 0.62));
+        v = MIN(0.78, MAX(0.48, v * 0.88));
     } else {
-        // Light recipe is intentionally restrained.
-        s = MIN(0.62, MAX(0.24, s * 0.68));
-        v = MIN(0.72, MAX(0.48, v * 0.78));
-        alpha = 0.045 + 0.085 * tintDrive;
+        // Light glass gets a quieter tint; material transmission stays dominant.
+        s = MIN(0.42, MAX(0.14, s * 0.46));
+        v = MIN(0.68, MAX(0.42, v * 0.76));
     }
 
-    return [UIColor colorWithHue:h saturation:s brightness:v alpha:alpha];
-}
-
-static UIColor *B3MGlassEdgeColorForView(UIView *view)
-{
-    UIColor *base = B3MResolvedBaseIconColor();
-
-    CGFloat h = 0.58, s = 0.58, v = 0.78, alpha = 1.0;
-    [base getHue:&h saturation:&s brightness:&v alpha:&alpha];
-
-    BOOL dark = B3MUsesDarkAppearance(view);
-    CGFloat edgeDrive = B3MEdgeResponse(dark ? 0.72 : 0.55);
-
-    if (dark) {
-        s = MIN(0.82, MAX(0.35, s * 0.82));
-        v = 1.0;
-        alpha = 0.14 + 0.24 * edgeDrive;
-    } else {
-        s = MIN(0.62, MAX(0.28, s * 0.70));
-        v = MIN(0.58, MAX(0.34, v * 0.58));
-        alpha = 0.10 + 0.16 * edgeDrive;
-    }
-
-    return [UIColor colorWithHue:h saturation:s brightness:v alpha:alpha];
+    return [UIColor colorWithHue:h saturation:s brightness:v alpha:1.0];
 }
 
 static UIColor *B3MGlassTextColorForView(UIView *view)
 {
     UIColor *base = B3MResolvedBaseIconColor();
 
-    CGFloat h = 0.58, s = 0.58, v = 0.78, alpha = 1.0;
+    CGFloat h = 0.58, s = 0.42, v = 0.72, alpha = 1.0;
     [base getHue:&h saturation:&s brightness:&v alpha:&alpha];
 
     if (B3MUsesDarkAppearance(view)) {
-        // Pale same-hue text, intentionally not the same RGB as background.
-        s = MIN(0.42, MAX(0.12, s * 0.42));
+        // Mostly neutral-white with only a small hue cue.
+        s = MIN(0.24, MAX(0.08, s * 0.28));
         v = 0.98;
     } else {
-        // Light mode uses a dark same-hue text for readable contrast.
-        s = MIN(0.72, MAX(0.30, s * 0.78));
-        v = 0.32;
+        // Dark same-hue text in Light Mode; avoids the old fluorescent labels.
+        s = MIN(0.48, MAX(0.20, s * 0.52));
+        v = 0.29;
     }
 
     return [UIColor colorWithHue:h saturation:s brightness:v alpha:1.0];
@@ -506,46 +515,280 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
     return (r > 0.65 && r > (g * 1.45) && r > (b * 1.25));
 }
 
-static UIView *B3MGlassOverlayForBackgroundView(UIView *backgroundView, BOOL create)
+@interface B3MMenuGlassView : UIView
+@property (nonatomic, strong) UIView *b3mTintView;
+@property (nonatomic, strong) UIVisualEffectView *b3mFallbackBlurView;
+@property (nonatomic, assign) CGFloat b3mStrength;
+@property (nonatomic, assign) CGFloat b3mPreferredRadius;
+@property (nonatomic, assign) BOOL b3mLastDarkAppearance;
+@property (nonatomic, assign) BOOL b3mHasAppearance;
+- (void)b3mRefreshMaterial;
+@end
+
+@implementation B3MMenuGlassView
+
++ (Class)layerClass
+{
+    Class backdropClass = NSClassFromString(@"CABackdropLayer");
+    return backdropClass ?: CALayer.class;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+
+    if (self) {
+        /*
+         * 62% is deliberately close to GlassFolders' accepted mid-range:
+         * enough authority to read as glass without whitening the menu.
+         */
+        _b3mStrength = 0.62;
+        _b3mPreferredRadius = 0.0;
+
+        self.backgroundColor = UIColor.clearColor;
+        self.userInteractionEnabled = NO;
+        self.clipsToBounds = YES;
+        self.layer.masksToBounds = YES;
+
+        _b3mTintView = [[UIView alloc] initWithFrame:self.bounds];
+        _b3mTintView.userInteractionEnabled = NO;
+        _b3mTintView.autoresizingMask =
+            UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        _b3mTintView.backgroundColor = UIColor.clearColor;
+
+        [self addSubview:_b3mTintView];
+
+        [self b3mRefreshMaterial];
+    }
+
+    return self;
+}
+
+- (void)b3mRefreshMaterial
+{
+    BOOL darkAppearance = B3MUsesDarkAppearance(self);
+
+    self.b3mLastDarkAppearance = darkAppearance;
+    self.b3mHasAppearance = YES;
+
+    CGFloat materialResponse =
+        B3MMaterialResponse(self.b3mStrength);
+    CGFloat specularResponse =
+        B3MSpecularResponse(self.b3mStrength);
+    CGFloat tintResponse =
+        B3MTintResponse(self.b3mStrength);
+    CGFloat edgeResponse =
+        B3MEdgeResponse(self.b3mStrength);
+
+    BOOL isBackdropLayer =
+        [NSStringFromClass(self.layer.class) containsString:@"Backdrop"];
+
+    if (isBackdropLayer) {
+        /*
+         * GlassFolders Liquid Glass opened-panel recipe, adapted to the much
+         * smaller Context Menu surface. The material remains wallpaper/backdrop
+         * driven; the app icon color is applied separately as a weak tint.
+         */
+        CGFloat blurRadius = darkAppearance
+            ? (4.6 + 4.8 * materialResponse)
+            : (2.6 + 2.8 * materialResponse);
+
+        CGFloat saturation = darkAppearance
+            ? (1.070 + 0.120 * materialResponse)
+            : (1.110 + 0.220 * materialResponse);
+
+        CGFloat brightness = darkAppearance
+            ? (0.015 + 0.025 * materialResponse)
+            : (0.026 + 0.030 * materialResponse);
+
+        CGFloat sampleAlpha = darkAppearance
+            ? (0.90 + 0.08 * materialResponse)
+            : (0.975 + 0.025 * materialResponse);
+
+        id saturate = B3MCreateCAFilter(@"colorSaturate");
+        id brighten = B3MCreateCAFilter(@"colorBrightness");
+        id blur = B3MCreateCAFilter(@"gaussianBlur");
+
+        NSMutableArray *filters = [NSMutableArray array];
+
+        if (saturate) {
+            [saturate setValue:@(saturation) forKey:@"inputAmount"];
+            [filters addObject:saturate];
+        }
+
+        if (brighten && fabs(brightness) > 0.0001) {
+            [brighten setValue:@(brightness) forKey:@"inputAmount"];
+            [filters addObject:brighten];
+        }
+
+        if (blur && blurRadius > 0.001) {
+            [blur setValue:@(blurRadius) forKey:@"inputRadius"];
+            [blur setValue:@YES forKey:@"inputNormalizeEdges"];
+            [filters addObject:blur];
+        }
+
+        [self.layer setValue:filters forKey:@"filters"];
+        [self.layer setValue:@1.0 forKey:@"scale"];
+        self.alpha = B3MClamp01(sampleAlpha);
+
+        if (self.b3mFallbackBlurView) {
+            [self.b3mFallbackBlurView removeFromSuperview];
+            self.b3mFallbackBlurView = nil;
+        }
+    } else {
+        if (!self.b3mFallbackBlurView) {
+            UIBlurEffect *effect =
+                [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
+
+            self.b3mFallbackBlurView =
+                [[UIVisualEffectView alloc] initWithEffect:effect];
+
+            self.b3mFallbackBlurView.userInteractionEnabled = NO;
+            self.b3mFallbackBlurView.autoresizingMask =
+                UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+            [self insertSubview:self.b3mFallbackBlurView
+                   belowSubview:self.b3mTintView];
+        }
+
+        self.b3mFallbackBlurView.frame = self.bounds;
+        self.b3mFallbackBlurView.alpha = darkAppearance
+            ? MIN(0.48, 0.20 + 0.30 * materialResponse)
+            : MIN(0.28, 0.10 + 0.18 * materialResponse);
+
+        self.alpha = 1.0;
+    }
+
+    /*
+     * Unlike GlassFolders' colorless wallpaper glass, Better3DMenus adds a
+     * deliberately weak app-icon chroma layer. It is never allowed to become
+     * the body material itself.
+     */
+    self.b3mTintView.backgroundColor = B3MGlassBodyTintColor(self);
+
+    CGFloat iconTintAlpha = darkAppearance
+        ? (0.045 + 0.075 * tintResponse)
+        : (0.018 + 0.032 * tintResponse);
+
+    self.b3mTintView.alpha =
+        MIN(darkAppearance ? 0.105 : 0.040, iconTintAlpha);
+
+    /*
+     * GlassFolders continuity-edge parameters. Specular and edge responses
+     * both participate so the border remains visible at mid strength without
+     * turning into a neon outline.
+     */
+    CGFloat continuityAlpha = darkAppearance
+        ? (0.022 + 0.022 * edgeResponse + 0.012 * specularResponse)
+        : (0.006 + 0.008 * edgeResponse + 0.004 * specularResponse);
+
+    self.layer.borderWidth = darkAppearance ? 0.42 : 0.34;
+    self.layer.borderColor =
+        [UIColor colorWithWhite:1.0
+                          alpha:B3MClamp01(continuityAlpha)].CGColor;
+
+    [self setNeedsLayout];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
+{
+    [super traitCollectionDidChange:previousTraitCollection];
+
+    UIUserInterfaceStyle previousStyle =
+        previousTraitCollection
+            ? previousTraitCollection.userInterfaceStyle
+            : UIUserInterfaceStyleUnspecified;
+
+    UIUserInterfaceStyle currentStyle =
+        self.traitCollection.userInterfaceStyle;
+
+    if (previousStyle != currentStyle) {
+        [self b3mRefreshMaterial];
+    }
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+
+    self.b3mTintView.frame = self.bounds;
+    self.b3mFallbackBlurView.frame = self.bounds;
+
+    CGFloat radius = self.b3mPreferredRadius;
+
+    if (radius <= 0.0) {
+        radius = 14.0;
+    }
+
+    CGFloat maxRadius =
+        MIN(CGRectGetWidth(self.bounds), CGRectGetHeight(self.bounds)) * 0.50;
+
+    radius = MIN(radius, maxRadius);
+
+    self.layer.cornerRadius = radius;
+    self.layer.cornerCurve = kCACornerCurveContinuous;
+
+    BOOL darkAppearance = B3MUsesDarkAppearance(self);
+
+    if (!self.b3mHasAppearance ||
+        self.b3mLastDarkAppearance != darkAppearance) {
+        [self b3mRefreshMaterial];
+    }
+}
+
+@end
+
+static B3MMenuGlassView *B3MGlassMaterialForBackgroundView(
+    UIView *backgroundView,
+    BOOL create)
 {
     if (!backgroundView) return nil;
 
-    UIView *overlay =
-        objc_getAssociatedObject(backgroundView, &kB3MGlassOverlayKey);
+    B3MMenuGlassView *material =
+        objc_getAssociatedObject(backgroundView, &kB3MGlassMaterialKey);
 
-    if (!overlay && create) {
-        overlay = [[UIView alloc] initWithFrame:backgroundView.bounds];
-        overlay.userInteractionEnabled = NO;
-        overlay.autoresizingMask =
+    if (!material && create) {
+        material =
+            [[B3MMenuGlassView alloc] initWithFrame:backgroundView.bounds];
+
+        material.autoresizingMask =
             UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
-        [backgroundView addSubview:overlay];
+        /*
+         * _UIElasticContextMenuBackgroundView is background-only. Add the
+         * material as its top background child; menu labels/icons live in the
+         * separate _UIContextMenuView hierarchy.
+         */
+        [backgroundView addSubview:material];
 
         objc_setAssociatedObject(
             backgroundView,
-            &kB3MGlassOverlayKey,
-            overlay,
+            &kB3MGlassMaterialKey,
+            material,
             OBJC_ASSOCIATION_RETAIN_NONATOMIC
         );
     }
 
-    return overlay;
+    return material;
 }
 
 static void B3MApplyGlassBackground(UIView *backgroundView)
 {
     if (!backgroundView) return;
 
-    UIView *overlay =
-        B3MGlassOverlayForBackgroundView(backgroundView, gB3MGlassMenuTint);
+    B3MMenuGlassView *material =
+        B3MGlassMaterialForBackgroundView(
+            backgroundView,
+            gB3MGlassMenuTint
+        );
 
     if (!gB3MGlassMenuTint) {
-        if (overlay) {
-            [overlay removeFromSuperview];
+        if (material) {
+            [material removeFromSuperview];
 
             objc_setAssociatedObject(
                 backgroundView,
-                &kB3MGlassOverlayKey,
+                &kB3MGlassMaterialKey,
                 nil,
                 OBJC_ASSOCIATION_RETAIN_NONATOMIC
             );
@@ -554,14 +797,20 @@ static void B3MApplyGlassBackground(UIView *backgroundView)
         return;
     }
 
-    overlay.frame = backgroundView.bounds;
-    overlay.layer.cornerRadius = backgroundView.layer.cornerRadius;
-    overlay.layer.masksToBounds = YES;
-    overlay.backgroundColor = B3MGlassBackgroundColorForView(backgroundView);
+    material.frame = backgroundView.bounds;
 
-    UIColor *edge = B3MGlassEdgeColorForView(backgroundView);
-    overlay.layer.borderColor = edge.CGColor;
-    overlay.layer.borderWidth = 0.65;
+    CGFloat radius = backgroundView.layer.cornerRadius;
+
+    if (radius <= 0.0) {
+        radius = 14.0;
+    }
+
+    material.b3mPreferredRadius = radius;
+
+    // Refresh the weak icon tint whenever the active app changes.
+    [material b3mRefreshMaterial];
+
+    [backgroundView bringSubviewToFront:material];
 }
 
 static void B3MApplyGlassTextRecursively(UIView *view)
@@ -988,6 +1237,17 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 
     if (((UIView *)self).window) {
         B3MRefreshActiveIconColor();
+
+        /*
+         * The elastic background may have attached one layout pass earlier.
+         * Refresh it after resolving the actual pressed-app color.
+         */
+        for (UIView *subview in ((UIView *)self).subviews) {
+            if ([NSStringFromClass(subview.class)
+                    isEqualToString:@"_UIElasticContextMenuBackgroundView"]) {
+                B3MApplyGlassBackground(subview);
+            }
+        }
     }
 
     B3MApplyBlurRecursively((UIView *)self, NO);

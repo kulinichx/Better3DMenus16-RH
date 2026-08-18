@@ -11,122 +11,112 @@
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Context Menu</string>
-			<key>footerText</key>
-			<string>iOS 16 / RootHide compatibility build. Visual context-menu tweaks only; no Home Screen long-press timing hooks are used.</string>
 		</dict>
 		<dict>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>Hide Separators</string>
+			<key>default</key>
+			<true/>
 			<key>defaults</key>
 			<string>com.kulinichx.better3dmenus16rh</string>
 			<key>key</key>
 			<string>HideSeparators</string>
-			<key>default</key>
-			<true/>
-			<key>PostNotification</key>
-			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+			<key>label</key>
+			<string>Hide Separators</string>
 		</dict>
 		<dict>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>Reduce Blur</string>
+			<key>default</key>
+			<true/>
 			<key>defaults</key>
 			<string>com.kulinichx.better3dmenus16rh</string>
 			<key>key</key>
 			<string>ReduceBlur</string>
-			<key>default</key>
-			<true/>
-			<key>PostNotification</key>
-			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+			<key>label</key>
+			<string>Reduce Blur</string>
 		</dict>
 		<dict>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>Hide Share App</string>
+			<key>default</key>
+			<true/>
 			<key>defaults</key>
 			<string>com.kulinichx.better3dmenus16rh</string>
 			<key>key</key>
 			<string>HideShareApp</string>
-			<key>default</key>
-			<true/>
-			<key>PostNotification</key>
-			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+			<key>label</key>
+			<string>Hide Share App</string>
 		</dict>
 		<dict>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>Hide Remove App</string>
+			<key>default</key>
+			<true/>
 			<key>defaults</key>
 			<string>com.kulinichx.better3dmenus16rh</string>
 			<key>key</key>
 			<string>HideRemoveApp</string>
-			<key>default</key>
-			<true/>
-			<key>PostNotification</key>
-			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+			<key>label</key>
+			<string>Hide Remove App</string>
 		</dict>
 		<dict>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>Hide Section Gap (Experimental)</string>
+			<key>default</key>
+			<true/>
 			<key>defaults</key>
 			<string>com.kulinichx.better3dmenus16rh</string>
 			<key>key</key>
 			<string>HideSectionGap</string>
-			<key>default</key>
-			<false/>
-			<key>PostNotification</key>
-			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+			<key>label</key>
+			<string>Hide Section Gap</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>Appearance</string>
+			<string>Glass</string>
 			<key>footerText</key>
-			<string>Dynamic Icon Glass samples the pressed app icon and derives the menu tint. Light and Dark modes use separate GlassFolders-inspired recipes. Adaptive Text Color uses a contrasting derived shade, not the same background color.</string>
+			<string>Glass follows the pressed app color. Light and Dark modes are tuned separately.</string>
 		</dict>
 		<dict>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>Dynamic Icon Glass</string>
+			<key>default</key>
+			<true/>
 			<key>defaults</key>
 			<string>com.kulinichx.better3dmenus16rh</string>
 			<key>key</key>
 			<string>GlassMenuTint</string>
-			<key>default</key>
-			<false/>
-			<key>PostNotification</key>
-			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+			<key>label</key>
+			<string>Dynamic App Glass</string>
 		</dict>
 		<dict>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>Adaptive Text Color</string>
+			<key>default</key>
+			<true/>
 			<key>defaults</key>
 			<string>com.kulinichx.better3dmenus16rh</string>
 			<key>key</key>
 			<string>GlassTextTint</string>
-			<key>default</key>
-			<false/>
-			<key>PostNotification</key>
-			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>Testing</string>
-			<key>footerText</key>
-			<string>v0.1.9 adds dynamic app-icon color extraction and separate Light/Dark glass recipes. No long-press timing modification is used.</string>
+			<string>Adaptive Text Color</string>
 		</dict>
 	</array>
 </dict>

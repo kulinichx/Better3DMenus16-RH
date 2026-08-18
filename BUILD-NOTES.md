@@ -1,11 +1,10 @@
-# Build notes — v0.1.9
+# Better3DMenus16-RH v0.2.0 — Glass Engine
 
-This package is intentionally self-consistent. Do not mix individual files from
-older 0.1.4–0.1.8 revisions.
-
-The GitHub Actions workflow validates the v0.1.9 control version, preference
-keys, dynamic-color implementation, PreferenceBundle metadata, and the absence
-of the unsafe long-press hooks before compiling.
-
-The workflow installs `ldid` and `dpkg` explicitly and clones RootHide Theos
-directly to avoid the previous `api.github.com` install-theos failure.
+- Replaces the old flat color overlay with a real CABackdropLayer material.
+- Uses GlassFolders 1.0 Material / Specular / Tint / Edge response curves.
+- Uses separate Light / Dark Liquid Glass blur, saturation, brightness and alpha recipes.
+- App icon color is only a weak chroma tint; it does not become the whole material.
+- Adaptive text color is more neutral in Dark Mode and darker in Light Mode.
+- Settings layout is simplified.
+- Settings icon is intentionally unchanged in this build; no generated artwork is included.
+- No minimumPressDuration, UILongPressGestureRecognizer, SBIconView or SBHIconView hook is added.
