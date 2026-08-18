@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <math.h>
+#import <string.h>
 
 static CFStringRef const kB3MPrefsDomain = CFSTR("com.kulinichx.better3dmenus16rh");
 static CFStringRef const kB3MNotification = CFSTR("com.kulinichx.better3dmenus16rh/preferences.changed");
@@ -22,8 +23,6 @@ static char kB3MSeparatorHiddenKey;
 static char kB3MSeparatorAlphaKey;
 static char kB3MBlurCapturedKey;
 static char kB3MBlurAlphaKey;
-static char kB3MTintCapturedKey;
-static char kB3MTintColorKey;
 static char kB3MTextCapturedKey;
 static char kB3MTextColorKey;
 static char kB3MGlassOverlayKey;
@@ -178,10 +177,6 @@ static inline CGFloat B3MClamp01(CGFloat value)
  * Tint intentionally rises slower than material/edge response so Light Mode
  * does not become a milky white card.
  */
-static inline CGFloat B3MMaterialResponse(CGFloat strength)
-{
-    return pow(B3MClamp01(strength), 1.10);
-}
 
 static inline CGFloat B3MTintResponse(CGFloat strength)
 {
@@ -265,21 +260,24 @@ static UIImage *B3MFindActiveIconSnapshotInView(UIView *view)
 static UIImage *B3MFindActiveIconSnapshot(void)
 {
     UIApplication *application = UIApplication.sharedApplication;
-  for (UIScene *scene in application.connectedScenes) {
-    if (![scene isKindOfClass:UIWindowScene.class]) continue;
 
-    UIWindowScene *windowScene = (UIWindowScene *)scene;
+    for (UIScene *scene in application.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) {
+            continue;
+        }
 
-    if (windowScene.activationState != UISceneActivationStateForegroundActive &&
-        windowScene.activationState != UISceneActivationStateForegroundInactive) {
-        continue;
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+
+        if (windowScene.activationState != UISceneActivationStateForegroundActive &&
+            windowScene.activationState != UISceneActivationStateForegroundInactive) {
+            continue;
+        }
+
+        for (UIWindow *window in windowScene.windows.reverseObjectEnumerator) {
+            UIImage *snapshot = B3MFindActiveIconSnapshotInView(window);
+            if (snapshot) return snapshot;
+        }
     }
-
-    for (UIWindow *window in windowScene.windows.reverseObjectEnumerator) {
-        UIImage *snapshot = B3MFindActiveIconSnapshotInView(window);
-        if (snapshot) return snapshot;
-    }
-}
 
     return nil;
 }
