@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <math.h>
 
 static CFStringRef const kB3MPrefsDomain = CFSTR("com.kulinichx.better3dmenus16rh");
@@ -14,6 +15,7 @@ static BOOL gB3MHideSectionGap = NO;
 static BOOL gB3MGlassMenuTint = NO;
 static BOOL gB3MGlassTextTint = NO;
 static CGFloat gB3MBlurFactor = 0.55;
+static UIColor *gB3MActiveIconColor = nil;
 
 static char kB3MSeparatorCapturedKey;
 static char kB3MSeparatorHiddenKey;
@@ -24,6 +26,7 @@ static char kB3MTintCapturedKey;
 static char kB3MTintColorKey;
 static char kB3MTextCapturedKey;
 static char kB3MTextColorKey;
+static char kB3MGlassOverlayKey;
 
 static BOOL B3MReadBool(CFStringRef key, BOOL fallback)
 {
@@ -165,16 +168,316 @@ static void B3MApplyBlurRecursively(UIView *view, BOOL backgroundAncestor)
 }
 
 
-static UIColor *B3MGlassMenuColor(void)
+static inline CGFloat B3MClamp01(CGFloat value)
 {
-    // Subtle cool-blue glass tint, intentionally low alpha.
-    return [UIColor colorWithRed:0.08 green:0.38 blue:0.82 alpha:0.28];
+    return MIN(1.0, MAX(0.0, value));
 }
 
-static UIColor *B3MGlassTextColor(void)
+/*
+ * GlassFolders-inspired response curves.
+ * Tint intentionally rises slower than material/edge response so Light Mode
+ * does not become a milky white card.
+ */
+static inline CGFloat B3MMaterialResponse(CGFloat strength)
 {
-    // Icy cyan-white accent chosen to match the new glass "3" icon.
-    return [UIColor colorWithRed:0.45 green:0.86 blue:1.00 alpha:1.00];
+    return pow(B3MClamp01(strength), 1.10);
+}
+
+static inline CGFloat B3MTintResponse(CGFloat strength)
+{
+    return pow(B3MClamp01(strength), 1.35);
+}
+
+static inline CGFloat B3MEdgeResponse(CGFloat strength)
+{
+    CGFloat s = B3MClamp01(strength);
+    return 0.12 * s + 0.88 * pow(s, 1.80);
+}
+
+static BOOL B3MUsesDarkAppearance(UIView *view)
+{
+    if (!view) return NO;
+
+    if (@available(iOS 12.0, *)) {
+        return view.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+    }
+
+    return NO;
+}
+
+static UIColor *B3MFallbackIconColor(void)
+{
+    return [UIColor colorWithHue:0.58 saturation:0.58 brightness:0.78 alpha:1.0];
+}
+
+static UIImage *B3MImageSnapshotFromIconView(UIView *view)
+{
+    if (!view) return nil;
+
+    BOOL active = NO;
+
+    SEL showingSEL = NSSelectorFromString(@"isShowingContextMenu");
+    if ([view respondsToSelector:showingSEL]) {
+        BOOL (*msgBool)(id, SEL) = (BOOL (*)(id, SEL))objc_msgSend;
+        active = msgBool(view, showingSEL);
+    }
+
+    if (!active) {
+        SEL activeSEL =
+            NSSelectorFromString(@"isContextMenuInteractionActiveOrPending");
+
+        if ([view respondsToSelector:activeSEL]) {
+            BOOL (*msgBool)(id, SEL) = (BOOL (*)(id, SEL))objc_msgSend;
+            active = msgBool(view, activeSEL);
+        }
+    }
+
+    if (!active) return nil;
+
+    SEL snapshotSEL = NSSelectorFromString(@"iconImageSnapshot");
+    if (![view respondsToSelector:snapshotSEL]) return nil;
+
+    id (*msgObject)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
+    id snapshot = msgObject(view, snapshotSEL);
+
+    return [snapshot isKindOfClass:UIImage.class] ? (UIImage *)snapshot : nil;
+}
+
+static UIImage *B3MFindActiveIconSnapshotInView(UIView *view)
+{
+    if (!view) return nil;
+
+    Class iconViewClass = NSClassFromString(@"SBIconView");
+
+    if (iconViewClass && [view isKindOfClass:iconViewClass]) {
+        UIImage *snapshot = B3MImageSnapshotFromIconView(view);
+        if (snapshot) return snapshot;
+    }
+
+    for (UIView *subview in view.subviews) {
+        UIImage *snapshot = B3MFindActiveIconSnapshotInView(subview);
+        if (snapshot) return snapshot;
+    }
+
+    return nil;
+}
+
+static UIImage *B3MFindActiveIconSnapshot(void)
+{
+    UIApplication *application = UIApplication.sharedApplication;
+    NSArray<UIWindow *> *windows = application.windows;
+
+    for (UIWindow *window in windows.reverseObjectEnumerator) {
+        UIImage *snapshot = B3MFindActiveIconSnapshotInView(window);
+        if (snapshot) return snapshot;
+    }
+
+    return nil;
+}
+
+static UIColor *B3MDominantColorFromImage(UIImage *image)
+{
+    CGImageRef cgImage = image.CGImage;
+    if (!cgImage) return B3MFallbackIconColor();
+
+    const size_t width = 24;
+    const size_t height = 24;
+    const size_t bytesPerPixel = 4;
+    const size_t bytesPerRow = width * bytesPerPixel;
+
+    unsigned char pixels[width * height * bytesPerPixel];
+    memset(pixels, 0, sizeof(pixels));
+
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(
+        pixels,
+        width,
+        height,
+        8,
+        bytesPerRow,
+        colorSpace,
+        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
+    );
+    CGColorSpaceRelease(colorSpace);
+
+    if (!context) return B3MFallbackIconColor();
+
+    CGContextSetInterpolationQuality(context, kCGInterpolationMedium);
+    CGContextDrawImage(context, CGRectMake(0, 0, width, height), cgImage);
+    CGContextRelease(context);
+
+    enum { kHueBins = 24 };
+
+    CGFloat weights[kHueBins] = {0};
+    CGFloat redSums[kHueBins] = {0};
+    CGFloat greenSums[kHueBins] = {0};
+    CGFloat blueSums[kHueBins] = {0};
+
+    for (size_t i = 0; i < width * height; i++) {
+        unsigned char *p = pixels + i * 4;
+
+        CGFloat r = p[0] / 255.0;
+        CGFloat g = p[1] / 255.0;
+        CGFloat b = p[2] / 255.0;
+        CGFloat a = p[3] / 255.0;
+
+        if (a < 0.18) continue;
+
+        CGFloat maxC = MAX(r, MAX(g, b));
+        CGFloat minC = MIN(r, MIN(g, b));
+        CGFloat delta = maxC - minC;
+        CGFloat brightness = maxC;
+        CGFloat saturation = maxC > 0.001 ? delta / maxC : 0.0;
+
+        // Ignore near-neutral and extreme pixels so white icon backgrounds
+        // do not wash the extracted app hue toward gray.
+        if (saturation < 0.16 || brightness < 0.12 || brightness > 0.97) {
+            continue;
+        }
+
+        CGFloat hue = 0.0;
+
+        if (delta > 0.0001) {
+            if (maxC == r) {
+                hue = fmod((g - b) / delta, 6.0);
+            } else if (maxC == g) {
+                hue = ((b - r) / delta) + 2.0;
+            } else {
+                hue = ((r - g) / delta) + 4.0;
+            }
+
+            hue /= 6.0;
+            if (hue < 0.0) hue += 1.0;
+        }
+
+        NSInteger bin = (NSInteger)floor(hue * kHueBins) % kHueBins;
+
+        CGFloat middlePreference =
+            1.0 - MIN(1.0, fabs(brightness - 0.58) / 0.58);
+
+        CGFloat weight =
+            a *
+            (0.28 + 0.72 * saturation) *
+            (0.72 + 0.28 * middlePreference);
+
+        weights[bin] += weight;
+        redSums[bin] += r * weight;
+        greenSums[bin] += g * weight;
+        blueSums[bin] += b * weight;
+    }
+
+    NSInteger bestBin = -1;
+    CGFloat bestWeight = 0.0;
+
+    for (NSInteger i = 0; i < kHueBins; i++) {
+        if (weights[i] > bestWeight) {
+            bestWeight = weights[i];
+            bestBin = i;
+        }
+    }
+
+    if (bestBin < 0 || bestWeight < 0.35) {
+        return B3MFallbackIconColor();
+    }
+
+    CGFloat r = redSums[bestBin] / bestWeight;
+    CGFloat g = greenSums[bestBin] / bestWeight;
+    CGFloat b = blueSums[bestBin] / bestWeight;
+
+    UIColor *raw = [UIColor colorWithRed:r green:g blue:b alpha:1.0];
+
+    CGFloat h = 0.0, s = 0.0, v = 0.0, alpha = 0.0;
+
+    if (![raw getHue:&h saturation:&s brightness:&v alpha:&alpha]) {
+        return raw;
+    }
+
+    s = MIN(0.90, MAX(0.42, s));
+    v = MIN(0.88, MAX(0.52, v));
+
+    return [UIColor colorWithHue:h saturation:s brightness:v alpha:1.0];
+}
+
+static void B3MRefreshActiveIconColor(void)
+{
+    UIImage *snapshot = B3MFindActiveIconSnapshot();
+
+    gB3MActiveIconColor = snapshot
+        ? B3MDominantColorFromImage(snapshot)
+        : B3MFallbackIconColor();
+}
+
+static UIColor *B3MResolvedBaseIconColor(void)
+{
+    return gB3MActiveIconColor ?: B3MFallbackIconColor();
+}
+
+static UIColor *B3MGlassBackgroundColorForView(UIView *view)
+{
+    UIColor *base = B3MResolvedBaseIconColor();
+
+    CGFloat h = 0.58, s = 0.58, v = 0.78, alpha = 1.0;
+    [base getHue:&h saturation:&s brightness:&v alpha:&alpha];
+
+    BOOL dark = B3MUsesDarkAppearance(view);
+    CGFloat strength = dark ? 0.72 : 0.55;
+    CGFloat tintDrive = B3MTintResponse(strength);
+
+    if (dark) {
+        s = MIN(0.88, MAX(0.42, s * 0.92));
+        v = MIN(0.82, MAX(0.52, v * 0.88));
+        alpha = 0.11 + 0.14 * tintDrive;
+    } else {
+        // Light recipe is intentionally restrained.
+        s = MIN(0.62, MAX(0.24, s * 0.68));
+        v = MIN(0.72, MAX(0.48, v * 0.78));
+        alpha = 0.045 + 0.085 * tintDrive;
+    }
+
+    return [UIColor colorWithHue:h saturation:s brightness:v alpha:alpha];
+}
+
+static UIColor *B3MGlassEdgeColorForView(UIView *view)
+{
+    UIColor *base = B3MResolvedBaseIconColor();
+
+    CGFloat h = 0.58, s = 0.58, v = 0.78, alpha = 1.0;
+    [base getHue:&h saturation:&s brightness:&v alpha:&alpha];
+
+    BOOL dark = B3MUsesDarkAppearance(view);
+    CGFloat edgeDrive = B3MEdgeResponse(dark ? 0.72 : 0.55);
+
+    if (dark) {
+        s = MIN(0.82, MAX(0.35, s * 0.82));
+        v = 1.0;
+        alpha = 0.14 + 0.24 * edgeDrive;
+    } else {
+        s = MIN(0.62, MAX(0.28, s * 0.70));
+        v = MIN(0.58, MAX(0.34, v * 0.58));
+        alpha = 0.10 + 0.16 * edgeDrive;
+    }
+
+    return [UIColor colorWithHue:h saturation:s brightness:v alpha:alpha];
+}
+
+static UIColor *B3MGlassTextColorForView(UIView *view)
+{
+    UIColor *base = B3MResolvedBaseIconColor();
+
+    CGFloat h = 0.58, s = 0.58, v = 0.78, alpha = 1.0;
+    [base getHue:&h saturation:&s brightness:&v alpha:&alpha];
+
+    if (B3MUsesDarkAppearance(view)) {
+        // Pale same-hue text, intentionally not the same RGB as background.
+        s = MIN(0.42, MAX(0.12, s * 0.42));
+        v = 0.98;
+    } else {
+        // Light mode uses a dark same-hue text for readable contrast.
+        s = MIN(0.72, MAX(0.30, s * 0.78));
+        v = 0.32;
+    }
+
+    return [UIColor colorWithHue:h saturation:s brightness:v alpha:1.0];
 }
 
 static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
@@ -182,72 +485,76 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
     if (!color) return NO;
 
     UIColor *resolved = color;
+
     if ([color respondsToSelector:@selector(resolvedColorWithTraitCollection:)]) {
         resolved = [color resolvedColorWithTraitCollection:traits];
     }
 
-    CGFloat r = 0.0, g = 0.0, b = 0.0, a = 0.0;
-    if (![resolved getRed:&r green:&g blue:&b alpha:&a]) {
+    CGFloat r = 0.0, g = 0.0, b = 0.0, alpha = 0.0;
+
+    if (![resolved getRed:&r green:&g blue:&b alpha:&alpha]) {
         return NO;
     }
 
-    // Preserve system/destructive reds instead of recoloring them.
     return (r > 0.65 && r > (g * 1.45) && r > (b * 1.25));
 }
 
-static void B3MApplyGlassTintRecursively(UIView *view, BOOL backgroundAncestor)
+static UIView *B3MGlassOverlayForBackgroundView(UIView *backgroundView, BOOL create)
 {
-    if (!view) return;
+    if (!backgroundView) return nil;
 
-    BOOL isBackgroundBranch =
-        backgroundAncestor || B3MClassNameLooksLikeBackground(view);
+    UIView *overlay =
+        objc_getAssociatedObject(backgroundView, &kB3MGlassOverlayKey);
 
-    if ([view isKindOfClass:UIVisualEffectView.class] && isBackgroundBranch) {
-        UIVisualEffectView *effectView = (UIVisualEffectView *)view;
-        UIView *contentView = effectView.contentView;
+    if (!overlay && create) {
+        overlay = [[UIView alloc] initWithFrame:backgroundView.bounds];
+        overlay.userInteractionEnabled = NO;
+        overlay.autoresizingMask =
+            UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
-        NSNumber *captured =
-            objc_getAssociatedObject(contentView, &kB3MTintCapturedKey);
+        [backgroundView addSubview:overlay];
 
-        if (gB3MGlassMenuTint) {
-            if (![captured boolValue]) {
-                UIColor *oldColor = contentView.backgroundColor;
-                objc_setAssociatedObject(
-                    contentView,
-                    &kB3MTintColorKey,
-                    oldColor ?: (id)[NSNull null],
-                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
-                );
-                objc_setAssociatedObject(
-                    contentView,
-                    &kB3MTintCapturedKey,
-                    @YES,
-                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
-                );
-            }
+        objc_setAssociatedObject(
+            backgroundView,
+            &kB3MGlassOverlayKey,
+            overlay,
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC
+        );
+    }
 
-            contentView.backgroundColor = B3MGlassMenuColor();
-        } else if ([captured boolValue]) {
-            id oldColor =
-                objc_getAssociatedObject(contentView, &kB3MTintColorKey);
+    return overlay;
+}
 
-            contentView.backgroundColor =
-                (oldColor == [NSNull null]) ? nil : (UIColor *)oldColor;
+static void B3MApplyGlassBackground(UIView *backgroundView)
+{
+    if (!backgroundView) return;
+
+    UIView *overlay =
+        B3MGlassOverlayForBackgroundView(backgroundView, gB3MGlassMenuTint);
+
+    if (!gB3MGlassMenuTint) {
+        if (overlay) {
+            [overlay removeFromSuperview];
 
             objc_setAssociatedObject(
-                contentView, &kB3MTintCapturedKey, nil,
-                OBJC_ASSOCIATION_RETAIN_NONATOMIC
-            );
-            objc_setAssociatedObject(
-                contentView, &kB3MTintColorKey, nil,
+                backgroundView,
+                &kB3MGlassOverlayKey,
+                nil,
                 OBJC_ASSOCIATION_RETAIN_NONATOMIC
             );
         }
+
+        return;
     }
 
-    for (UIView *subview in view.subviews) {
-        B3MApplyGlassTintRecursively(subview, isBackgroundBranch);
-    }
+    overlay.frame = backgroundView.bounds;
+    overlay.layer.cornerRadius = backgroundView.layer.cornerRadius;
+    overlay.layer.masksToBounds = YES;
+    overlay.backgroundColor = B3MGlassBackgroundColorForView(backgroundView);
+
+    UIColor *edge = B3MGlassEdgeColorForView(backgroundView);
+    overlay.layer.borderColor = edge.CGColor;
+    overlay.layer.borderWidth = 0.65;
 }
 
 static void B3MApplyGlassTextRecursively(UIView *view)
@@ -256,20 +563,50 @@ static void B3MApplyGlassTextRecursively(UIView *view)
 
     if ([view isKindOfClass:UILabel.class]) {
         UILabel *label = (UILabel *)view;
+
         NSNumber *captured =
             objc_getAssociatedObject(label, &kB3MTextCapturedKey);
 
-        if (gB3MGlassTextTint) {
-            UIColor *current = label.textColor;
+        id oldStored =
+            objc_getAssociatedObject(label, &kB3MTextColorKey);
 
-            if (!B3MColorLooksDestructive(current, label.traitCollection)) {
+        UIColor *originalColor = nil;
+
+        if ([captured boolValue]) {
+            originalColor =
+                (oldStored == [NSNull null]) ? nil : (UIColor *)oldStored;
+        } else {
+            originalColor = label.textColor;
+        }
+
+        if (gB3MGlassTextTint) {
+            if (B3MColorLooksDestructive(originalColor, label.traitCollection)) {
+                if ([captured boolValue]) {
+                    label.textColor = originalColor;
+
+                    objc_setAssociatedObject(
+                        label,
+                        &kB3MTextCapturedKey,
+                        nil,
+                        OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                    );
+
+                    objc_setAssociatedObject(
+                        label,
+                        &kB3MTextColorKey,
+                        nil,
+                        OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                    );
+                }
+            } else {
                 if (![captured boolValue]) {
                     objc_setAssociatedObject(
                         label,
                         &kB3MTextColorKey,
-                        current ?: (id)[NSNull null],
+                        originalColor ?: (id)[NSNull null],
                         OBJC_ASSOCIATION_RETAIN_NONATOMIC
                     );
+
                     objc_setAssociatedObject(
                         label,
                         &kB3MTextCapturedKey,
@@ -278,21 +615,22 @@ static void B3MApplyGlassTextRecursively(UIView *view)
                     );
                 }
 
-                label.textColor = B3MGlassTextColor();
+                label.textColor = B3MGlassTextColorForView(label);
             }
         } else if ([captured boolValue]) {
-            id oldColor =
-                objc_getAssociatedObject(label, &kB3MTextColorKey);
-
-            label.textColor =
-                (oldColor == [NSNull null]) ? nil : (UIColor *)oldColor;
+            label.textColor = originalColor;
 
             objc_setAssociatedObject(
-                label, &kB3MTextCapturedKey, nil,
+                label,
+                &kB3MTextCapturedKey,
+                nil,
                 OBJC_ASSOCIATION_RETAIN_NONATOMIC
             );
+
             objc_setAssociatedObject(
-                label, &kB3MTextColorKey, nil,
+                label,
+                &kB3MTextColorKey,
+                nil,
                 OBJC_ASSOCIATION_RETAIN_NONATOMIC
             );
         }
@@ -617,14 +955,20 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 {
     %orig;
     B3MApplyBlurRecursively((UIView *)self, YES);
-    B3MApplyGlassTintRecursively((UIView *)self, YES);
+    B3MApplyGlassBackground((UIView *)self);
 }
 
 - (void)layoutSubviews
 {
     %orig;
     B3MApplyBlurRecursively((UIView *)self, YES);
-    B3MApplyGlassTintRecursively((UIView *)self, YES);
+    B3MApplyGlassBackground((UIView *)self);
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
+{
+    %orig(previousTraitCollection);
+    B3MApplyGlassBackground((UIView *)self);
 }
 
 %end
@@ -634,8 +978,12 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 - (void)didMoveToWindow
 {
     %orig;
+
+    if (((UIView *)self).window) {
+        B3MRefreshActiveIconColor();
+    }
+
     B3MApplyBlurRecursively((UIView *)self, NO);
-    B3MApplyGlassTintRecursively((UIView *)self, NO);
     B3MApplyGlassTextRecursively((UIView *)self);
 }
 
@@ -643,7 +991,12 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 {
     %orig;
     B3MApplyBlurRecursively((UIView *)self, NO);
-    B3MApplyGlassTintRecursively((UIView *)self, NO);
+    B3MApplyGlassTextRecursively((UIView *)self);
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
+{
+    %orig(previousTraitCollection);
     B3MApplyGlassTextRecursively((UIView *)self);
 }
 
