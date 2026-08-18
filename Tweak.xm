@@ -265,12 +265,21 @@ static UIImage *B3MFindActiveIconSnapshotInView(UIView *view)
 static UIImage *B3MFindActiveIconSnapshot(void)
 {
     UIApplication *application = UIApplication.sharedApplication;
-    NSArray<UIWindow *> *windows = application.windows;
+  for (UIScene *scene in application.connectedScenes) {
+    if (![scene isKindOfClass:UIWindowScene.class]) continue;
 
-    for (UIWindow *window in windows.reverseObjectEnumerator) {
+    UIWindowScene *windowScene = (UIWindowScene *)scene;
+
+    if (windowScene.activationState != UISceneActivationStateForegroundActive &&
+        windowScene.activationState != UISceneActivationStateForegroundInactive) {
+        continue;
+    }
+
+    for (UIWindow *window in windowScene.windows.reverseObjectEnumerator) {
         UIImage *snapshot = B3MFindActiveIconSnapshotInView(window);
         if (snapshot) return snapshot;
     }
+}
 
     return nil;
 }
