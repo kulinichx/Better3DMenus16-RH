@@ -1,8 +1,8 @@
-# Better3DMenus16-RH v0.1
+# Better3DMenus16-RH v0.1.2
 
 A conservative iOS 16 / RootHide rewrite inspired by the useful parts of the legacy Better3DMenus tweak.
 
-## v0.1 scope
+## v0.1.2 scope
 
 - Hide Separators
 - Reduce Blur
