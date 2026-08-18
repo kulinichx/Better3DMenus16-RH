@@ -28,7 +28,7 @@ jobs:
           THEOS: ${{ github.workspace }}/.theos
         run: |
           set -euxo pipefail
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/roothide/theos/master/bin/install-theos)"
+          git clone --recursive https://github.com/roothide/theos.git "$THEOS"
           echo "THEOS=${THEOS}" >> "$GITHUB_ENV"
 
       - name: Install patched iOS 16.5 SDK
@@ -48,19 +48,26 @@ jobs:
           test -f Better3DMenus16RH.plist
           plutil -lint Better3DMenus16RH.plist
           grep -q 'com.apple.springboard' Better3DMenus16RH.plist
+
           test -f better3dmenus16rhprefs/Resources/Info.plist
           plutil -lint better3dmenus16rhprefs/Resources/Info.plist
+
           test -f better3dmenus16rhprefs/Resources/Root.plist
           plutil -lint better3dmenus16rhprefs/Resources/Root.plist
+
           test -f better3dmenus16rhprefs/Resources/icon.png
           test -f better3dmenus16rhprefs/Resources/icon@2x.png
           test -f better3dmenus16rhprefs/Resources/icon@3x.png
+
           grep -q 'icon = icon.png;' layout/Library/PreferenceLoader/Preferences/Better3DMenus16RH.plist
           grep -q 'isController = 1;' layout/Library/PreferenceLoader/Preferences/Better3DMenus16RH.plist
+
           grep -q '<key>CFBundleExecutable</key>' better3dmenus16rhprefs/Resources/Info.plist
           grep -q '<string>Better3DMenus16RHPrefs</string>' better3dmenus16rhprefs/Resources/Info.plist
+
           grep -q '<key>NSPrincipalClass</key>' better3dmenus16rhprefs/Resources/Info.plist
           grep -q '<string>B3MRootListController</string>' better3dmenus16rhprefs/Resources/Info.plist
+
           ! grep -q 'minimumPressDuration' Tweak.xm
           ! grep -q '%hook SBIconView' Tweak.xm
           ! grep -q '%hook SBHIconView' Tweak.xm
@@ -74,6 +81,6 @@ jobs:
       - name: Upload DEB
         uses: actions/upload-artifact@v4
         with:
-          name: Better3DMenus16-RH-v0.1.4-safetyfix
+          name: Better3DMenus16-RH-RootHide
           path: packages/*.deb
           if-no-files-found: error
