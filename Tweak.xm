@@ -168,13 +168,13 @@ static void B3MApplyBlurRecursively(UIView *view, BOOL backgroundAncestor)
 static UIColor *B3MGlassMenuColor(void)
 {
     // Subtle cool-blue glass tint, intentionally low alpha.
-    return [UIColor colorWithRed:0.10 green:0.42 blue:0.82 alpha:0.11];
+    return [UIColor colorWithRed:0.08 green:0.38 blue:0.82 alpha:0.28];
 }
 
 static UIColor *B3MGlassTextColor(void)
 {
     // Icy cyan-white accent chosen to match the new glass "3" icon.
-    return [UIColor colorWithRed:0.73 green:0.90 blue:1.00 alpha:1.00];
+    return [UIColor colorWithRed:0.45 green:0.86 blue:1.00 alpha:1.00];
 }
 
 static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
@@ -322,44 +322,63 @@ static BOOL B3MActionIdentifierLooksLikeShareApp(NSString *identifier)
     return springBoardOwned && shortcutItem && share;
 }
 
+static NSString *B3MNormalizeMenuTitle(NSString *title)
+{
+    if (title.length == 0) return @"";
+
+    NSString *normalized = [title lowercaseString];
+    normalized = [normalized stringByReplacingOccurrencesOfString:@" " withString:@""];
+    normalized = [normalized stringByReplacingOccurrencesOfString:@"\u00a0" withString:@""];
+    normalized = [normalized stringByReplacingOccurrencesOfString:@"\t" withString:@""];
+    normalized = [normalized stringByReplacingOccurrencesOfString:@"\n" withString:@""];
+
+    return normalized;
+}
+
 static BOOL B3MTitleLooksLikeShareApp(NSString *title)
 {
-    if (title.length == 0) return NO;
+    NSString *normalized = B3MNormalizeMenuTitle(title);
+    if (normalized.length == 0) return NO;
 
     static NSSet<NSString *> *knownTitles;
     static dispatch_once_t onceToken;
 
     dispatch_once(&onceToken, ^{
         knownTitles = [NSSet setWithArray:@[
-            @"Share App",
-            @"共享 App",
-            @"分享 App",
-            @"共享应用",
-            @"分享应用"
+            @"shareapp",
+            @"分享app",
+            @"共享app",
+            @"分享应用",
+            @"共享应用"
         ]];
     });
 
-    return [knownTitles containsObject:title];
+    return [knownTitles containsObject:normalized];
 }
 
 static BOOL B3MIsShareAppElement(UIMenuElement *element)
 {
-    if (!gB3MHideShareApp || ![element isKindOfClass:UIAction.class]) {
+    if (!gB3MHideShareApp || !element) {
         return NO;
     }
 
-    UIAction *action = (UIAction *)element;
     NSString *identifier = nil;
+    NSString *title = nil;
+    id candidate = (id)element;
 
-    if ([action respondsToSelector:@selector(identifier)]) {
-        identifier = action.identifier;
+    if ([candidate respondsToSelector:@selector(identifier)]) {
+        identifier = [candidate identifier];
+    }
+
+    if ([candidate respondsToSelector:@selector(title)]) {
+        title = [candidate title];
     }
 
     if (B3MActionIdentifierLooksLikeShareApp(identifier)) {
         return YES;
     }
 
-    return B3MTitleLooksLikeShareApp(action.title);
+    return B3MTitleLooksLikeShareApp(title);
 }
 
 
@@ -404,40 +423,45 @@ static BOOL B3MActionIdentifierLooksLikeRemoveApp(NSString *identifier)
 
 static BOOL B3MTitleLooksLikeRemoveApp(NSString *title)
 {
-    if (title.length == 0) return NO;
+    NSString *normalized = B3MNormalizeMenuTitle(title);
+    if (normalized.length == 0) return NO;
 
     static NSSet<NSString *> *knownTitles;
     static dispatch_once_t onceToken;
 
     dispatch_once(&onceToken, ^{
         knownTitles = [NSSet setWithArray:@[
-            @"Remove App",
-            @"移除 App",
-            @"移除App"
+            @"removeapp",
+            @"移除app"
         ]];
     });
 
-    return [knownTitles containsObject:title];
+    return [knownTitles containsObject:normalized];
 }
 
 static BOOL B3MIsRemoveAppElement(UIMenuElement *element)
 {
-    if (!gB3MHideRemoveApp || ![element isKindOfClass:UIAction.class]) {
+    if (!gB3MHideRemoveApp || !element) {
         return NO;
     }
 
-    UIAction *action = (UIAction *)element;
     NSString *identifier = nil;
+    NSString *title = nil;
+    id candidate = (id)element;
 
-    if ([action respondsToSelector:@selector(identifier)]) {
-        identifier = action.identifier;
+    if ([candidate respondsToSelector:@selector(identifier)]) {
+        identifier = [candidate identifier];
+    }
+
+    if ([candidate respondsToSelector:@selector(title)]) {
+        title = [candidate title];
     }
 
     if (B3MActionIdentifierLooksLikeRemoveApp(identifier)) {
         return YES;
     }
 
-    return B3MTitleLooksLikeRemoveApp(action.title);
+    return B3MTitleLooksLikeRemoveApp(title);
 }
 
 static __thread BOOL gB3MInsideMenuRewrite = NO;

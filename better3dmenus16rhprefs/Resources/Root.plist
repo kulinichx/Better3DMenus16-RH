@@ -90,7 +90,7 @@
 			<key>label</key>
 			<string>Appearance</string>
 			<key>footerText</key>
-			<string>Glass colors are scoped to the iOS 16 Context Menu only. Destructive red labels are preserved.</string>
+			<string>Glass Menu Tint now uses a stronger cool-blue overlay. Glass Text Tint uses a brighter cyan while destructive red labels remain untouched.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -126,7 +126,7 @@
 			<key>label</key>
 			<string>Testing</string>
 			<key>footerText</key>
-			<string>v0.1.7 adds the new glass icon plus optional menu/text glass tint. Faster Haptic Touch remains disabled until its iOS 16 activation path is isolated safely.</string>
+			<string>v0.1.8 improves Share App filtering and strengthens the glass background/text tint. Faster Haptic Touch remains disabled.</string>
 		</dict>
 	</array>
 </dict>
