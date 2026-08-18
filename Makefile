@@ -6,7 +6,7 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = Better3DMenus16RH
-Better3DMenus16RH_FILES = Tweak.xm PressureActivationDiagnostic.xm
+Better3DMenus16RH_FILES = Tweak.xm
 Better3DMenus16RH_CFLAGS = -fobjc-arc -Wall -Wextra
 Better3DMenus16RH_FRAMEWORKS = UIKit QuartzCore
 

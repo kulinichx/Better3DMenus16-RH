@@ -1,6 +1,6 @@
-# Better3DMenus16-RH v0.1.9
+# 3DTouchGlass v0.3.0
 
-Native iOS 16 / RootHide / Dopamine rewrite of the useful Better3DMenus features.
+iOS 16 / RootHide / Dopamine context-menu customization with Clear and Liquid Glass effects.
 
 ## Target
 - iPhone 14 Pro / A16 / iOS 16.6
@@ -14,11 +14,14 @@ Native iOS 16 / RootHide / Dopamine rewrite of the useful Better3DMenus features
 - Hide Share App
 - Hide Remove App
 - Hide Section Gap
-- Dynamic Icon Glass (experimental)
-- Adaptive Text Color (experimental)
+- Adaptive Text Color
+- Glass Effect toggle
+- Clear / Liquid Glass segmented styles
+- Independent Clear / Liquid Glass strength values
+- Single active Strength slider with 5% detents and haptic feedback
 
 ## Safety
-Faster Haptic Touch is not implemented in this version. There are no global
+Faster Haptic Touch / Pressure Activation is not included in v0.3.0. There are no global
 `minimumPressDuration`, `UILongPressGestureRecognizer`, `SBIconView`, or
 `SBHIconView` gesture hooks.
 

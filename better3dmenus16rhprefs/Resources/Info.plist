@@ -9,13 +9,13 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Better3DMenus16-RH</string>
+	<string>3DTouchGlass</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.2</string>
+	<string>0.3.0</string>
 	<key>CFBundleVersion</key>
-	<string>22</string>
+	<string>30</string>
 	<key>CFBundleExecutable</key>
 	<string>Better3DMenus16RHPrefs</string>
 	<key>NSPrincipalClass</key>
