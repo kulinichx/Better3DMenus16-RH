@@ -1,8 +1,8 @@
 Package: com.kulinichx.better3dmenus16rh
 Name: Better3DMenus16-RH
-Version: 0.1.2
+Version: 0.1.4
 Architecture: iphoneos-arm64e
-Description: Conservative iOS 16 RootHide context-menu tweaks: hide separators, reduce blur, hide Share App, and shorten Home Screen long-press delay.
+Description: Conservative iOS 16 RootHide context-menu tweaks: hide separators, reduce blur, and hide the Share App action. v0.1.4 removes the unsafe Home Screen long-press timing hook.
 Maintainer: kulinichx
 Author: Better3DMenus16-RH compatibility port
 Section: Tweaks

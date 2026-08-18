@@ -2,82 +2,68 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>title</key>
-    <string>Better3DMenus16-RH</string>
-    <key>items</key>
-    <array>
-        <dict>
-            <key>cell</key>
-            <string>PSGroupCell</string>
-            <key>label</key>
-            <string>Context Menu</string>
-            <key>footerText</key>
-            <string>iOS 16 / RootHide compatibility build. Changes are intentionally limited to visual cleanup and Home Screen long-press timing.</string>
-        </dict>
-        <dict>
-            <key>cell</key>
-            <string>PSSwitchCell</string>
-            <key>label</key>
-            <string>Hide Separators</string>
-            <key>defaults</key>
-            <string>com.kulinichx.better3dmenus16rh</string>
-            <key>key</key>
-            <string>HideSeparators</string>
-            <key>default</key>
-            <true/>
-            <key>PostNotification</key>
-            <string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
-        </dict>
-        <dict>
-            <key>cell</key>
-            <string>PSSwitchCell</string>
-            <key>label</key>
-            <string>Reduce Blur</string>
-            <key>defaults</key>
-            <string>com.kulinichx.better3dmenus16rh</string>
-            <key>key</key>
-            <string>ReduceBlur</string>
-            <key>default</key>
-            <true/>
-            <key>PostNotification</key>
-            <string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
-        </dict>
-        <dict>
-            <key>cell</key>
-            <string>PSSwitchCell</string>
-            <key>label</key>
-            <string>Hide Share App</string>
-            <key>defaults</key>
-            <string>com.kulinichx.better3dmenus16rh</string>
-            <key>key</key>
-            <string>HideShareApp</string>
-            <key>default</key>
-            <true/>
-            <key>PostNotification</key>
-            <string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
-        </dict>
-        <dict>
-            <key>cell</key>
-            <string>PSSwitchCell</string>
-            <key>label</key>
-            <string>Faster Haptic Touch</string>
-            <key>defaults</key>
-            <string>com.kulinichx.better3dmenus16rh</string>
-            <key>key</key>
-            <string>FasterHapticTouch</string>
-            <key>default</key>
-            <true/>
-            <key>PostNotification</key>
-            <string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
-        </dict>
-        <dict>
-            <key>cell</key>
-            <string>PSGroupCell</string>
-            <key>label</key>
-            <string>Testing</string>
-            <key>footerText</key>
-            <string>After changing Faster Haptic Touch, respring before judging timing. If SpringBoard becomes unstable, disable the last feature changed before continuing D1 stability testing.</string>
-        </dict>
-    </array>
+	<key>title</key>
+	<string>Better3DMenus16-RH</string>
+	<key>items</key>
+	<array>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Context Menu</string>
+			<key>footerText</key>
+			<string>iOS 16 / RootHide compatibility build. This safety build only changes context-menu visuals and Share App filtering.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>Hide Separators</string>
+			<key>defaults</key>
+			<string>com.kulinichx.better3dmenus16rh</string>
+			<key>key</key>
+			<string>HideSeparators</string>
+			<key>default</key>
+			<true/>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>Reduce Blur</string>
+			<key>defaults</key>
+			<string>com.kulinichx.better3dmenus16rh</string>
+			<key>key</key>
+			<string>ReduceBlur</string>
+			<key>default</key>
+			<true/>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>Hide Share App</string>
+			<key>defaults</key>
+			<string>com.kulinichx.better3dmenus16rh</string>
+			<key>key</key>
+			<string>HideShareApp</string>
+			<key>default</key>
+			<true/>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Testing</string>
+			<key>footerText</key>
+			<string>v0.1.4 safety fix removes the experimental Faster Haptic Touch hook because it could shorten the Home Screen edit-mode gesture. If SpringBoard becomes unstable, disable the last feature changed before continuing D1 stability testing.</string>
+		</dict>
+	</array>
 </dict>
 </plist>

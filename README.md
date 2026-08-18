@@ -7,7 +7,6 @@ A conservative iOS 16 / RootHide rewrite inspired by the useful parts of the leg
 - Hide Separators
 - Reduce Blur
 - Hide Share App
-- Faster Haptic Touch
 
 Explicitly not included:
 
@@ -27,7 +26,6 @@ Primary test target: iPhone 14 Pro / iPhone15,2 / A16 / iOS 16.6 / RootHide Dopa
 - Injects only into SpringBoard.
 - Uses modern UIKit menu objects for Share App filtering.
 - Separator and blur changes are view-only and restore their captured state when disabled.
-- Faster Haptic Touch is scoped to SpringBoard icon-view long-press recognizers instead of globally changing all long presses.
 - Private classes are hooked only by name; if a class is absent on a particular iOS 16 build, that hook simply has no effect rather than relying on ivars or fixed subview indexes.
 
 ## Build
@@ -52,3 +50,14 @@ Start with all four features enabled, then verify:
 6. Run normal Sileo / install-app / respring scenarios separately so tweak failures are not confused with D1 stability results.
 
 If a feature is ineffective on a specific iOS 16 build, disable it and report the device/iOS version; do not repeatedly force a SpringBoard crash while D1 is under soak testing.
+
+
+## Personal-use icon build
+
+This local/personal build includes the icon extracted from the user-supplied original Better3DMenus 2.4 package. Do not publish or redistribute that artwork without permission from the original author/rightsholder.
+
+
+## v0.1.4 safety fix
+
+
+PreferenceBundle metadata was also corrected with CFBundleExecutable, NSPrincipalClass, and PreferenceLoader isController so the Settings page can load its specifiers correctly.

@@ -4,5 +4,7 @@
         cell = PSLinkCell;
         detail = B3MRootListController;
         label = Better3DMenus16-RH;
+        icon = icon.png;
+        isController = 1;
     };
 }

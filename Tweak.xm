@@ -9,9 +9,7 @@ static CFStringRef const kB3MNotification = CFSTR("com.kulinichx.better3dmenus16
 static BOOL gB3MHideSeparators = YES;
 static BOOL gB3MReduceBlur = YES;
 static BOOL gB3MHideShareApp = YES;
-static BOOL gB3MFasterHaptic = YES;
 static CGFloat gB3MBlurFactor = 0.55;
-static NSTimeInterval gB3MLongPressDuration = 0.22;
 
 static char kB3MSeparatorCapturedKey;
 static char kB3MSeparatorHiddenKey;
@@ -64,9 +62,7 @@ static void B3MLoadPreferences(void)
     gB3MHideSeparators = B3MReadBool(CFSTR("HideSeparators"), YES);
     gB3MReduceBlur = B3MReadBool(CFSTR("ReduceBlur"), YES);
     gB3MHideShareApp = B3MReadBool(CFSTR("HideShareApp"), YES);
-    gB3MFasterHaptic = B3MReadBool(CFSTR("FasterHapticTouch"), YES);
     gB3MBlurFactor = (CGFloat)B3MReadDouble(CFSTR("BlurFactor"), 0.55, 0.20, 1.00);
-    gB3MLongPressDuration = B3MReadDouble(CFSTR("LongPressDuration"), 0.22, 0.12, 0.50);
 }
 
 static void B3MPreferencesChanged(CFNotificationCenterRef center,
@@ -225,25 +221,6 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
     return changed ? result.copy : children;
 }
 
-static void B3MAdjustLongPressRecognizer(UIGestureRecognizer *recognizer)
-{
-    if (!gB3MFasterHaptic || ![recognizer isKindOfClass:UILongPressGestureRecognizer.class]) return;
-
-    UILongPressGestureRecognizer *longPress = (UILongPressGestureRecognizer *)recognizer;
-    NSTimeInterval current = longPress.minimumPressDuration;
-    if (current <= 0.0 || current > gB3MLongPressDuration) {
-        longPress.minimumPressDuration = gB3MLongPressDuration;
-    }
-}
-
-static void B3MAdjustIconViewRecognizers(UIView *view)
-{
-    if (!gB3MFasterHaptic || !view) return;
-    for (UIGestureRecognizer *recognizer in view.gestureRecognizers) {
-        B3MAdjustLongPressRecognizer(recognizer);
-    }
-}
-
 %hook _UIContextMenuActionsListSeparatorView
 - (void)didMoveToWindow { %orig; B3MApplySeparatorState((UIView *)self); }
 - (void)layoutSubviews { %orig; B3MApplySeparatorState((UIView *)self); }
@@ -326,32 +303,6 @@ static void B3MAdjustIconViewRecognizers(UIView *view)
     if (gB3MInsideMenuRewrite || !gB3MHideShareApp) return %orig;
     NSArray<UIMenuElement *> *filtered = B3MFilterMenuElements(children);
     return %orig(filtered);
-}
-%end
-
-%hook SBIconView
-- (void)addGestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
-{
-    %orig;
-    B3MAdjustLongPressRecognizer(gestureRecognizer);
-}
-- (void)didMoveToWindow
-{
-    %orig;
-    B3MAdjustIconViewRecognizers((UIView *)self);
-}
-%end
-
-%hook SBHIconView
-- (void)addGestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
-{
-    %orig;
-    B3MAdjustLongPressRecognizer(gestureRecognizer);
-}
-- (void)didMoveToWindow
-{
-    %orig;
-    B3MAdjustIconViewRecognizers((UIView *)self);
 }
 %end
 
