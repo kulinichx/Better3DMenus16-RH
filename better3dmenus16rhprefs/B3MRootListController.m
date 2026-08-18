@@ -1,6 +1,7 @@
 #import "B3MRootListController.h"
 #import <Preferences/PSSpecifier.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <UIKit/UIKit.h>
 
 static CFStringRef const kB3MPrefsDomain =
     CFSTR("com.kulinichx.better3dmenus16rh");
@@ -8,7 +9,114 @@ static CFStringRef const kB3MPrefsDomain =
 static CFStringRef const kB3MPreferencesChanged =
     CFSTR("com.kulinichx.better3dmenus16rh/preferences.changed");
 
+static const double kB3MStrengthStep = 5.0;
+
+static double B3MSnapStrength(double value)
+{
+    value = MAX(0.0, MIN(100.0, value));
+
+    double snapped =
+        round(value / kB3MStrengthStep) *
+        kB3MStrengthStep;
+
+    return MAX(0.0, MIN(100.0, snapped));
+}
+
+@interface PSControlTableCell : UITableViewCell
+- (UIControl *)control;
+@end
+
+@interface PSSliderTableCell : PSControlTableCell
+- (instancetype)initWithStyle:(UITableViewCellStyle)style
+              reuseIdentifier:(NSString *)reuseIdentifier
+                    specifier:(PSSpecifier *)specifier;
+@end
+
+@interface PSListController (B3MReloadSpecifier)
+- (void)reloadSpecifier:(PSSpecifier *)specifier;
+@end
+
+@interface B3MSteppedSliderCell : PSSliderTableCell
+@end
+
+@implementation B3MSteppedSliderCell
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style
+              reuseIdentifier:(NSString *)reuseIdentifier
+                    specifier:(PSSpecifier *)specifier
+{
+    self =
+        [super initWithStyle:style
+             reuseIdentifier:reuseIdentifier
+                   specifier:specifier];
+
+    if (self) {
+        [self b3mInstallStepTarget];
+    }
+
+    return self;
+}
+
+- (void)didMoveToWindow
+{
+    [super didMoveToWindow];
+    [self b3mInstallStepTarget];
+}
+
+- (void)b3mInstallStepTarget
+{
+    UIControl *control = [self control];
+
+    if (![control isKindOfClass:UISlider.class]) {
+        return;
+    }
+
+    UISlider *slider = (UISlider *)control;
+
+    [slider removeTarget:self
+                  action:@selector(b3mSliderValueChanged:)
+        forControlEvents:UIControlEventValueChanged];
+
+    [slider addTarget:self
+               action:@selector(b3mSliderValueChanged:)
+     forControlEvents:UIControlEventValueChanged];
+}
+
+- (void)b3mSliderValueChanged:(UISlider *)slider
+{
+    float snapped =
+        (float)B3MSnapStrength(slider.value);
+
+    if (fabsf(slider.value - snapped) > 0.001f) {
+        slider.value = snapped;
+    }
+}
+
+@end
+
+@interface B3MRootListController ()
+
+@property (nonatomic, strong)
+    UISelectionFeedbackGenerator *b3mSelectionFeedback;
+
+@property (nonatomic, assign)
+    NSInteger b3mLastHapticStep;
+
+@end
+
 @implementation B3MRootListController
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+
+    self.b3mLastHapticStep = -1;
+
+    self.b3mSelectionFeedback =
+        [[UISelectionFeedbackGenerator alloc] init];
+
+    [self.b3mSelectionFeedback prepare];
+}
 
 - (NSArray *)specifiers
 {
@@ -97,9 +205,7 @@ static CFStringRef const kB3MPreferencesChanged =
         CFRelease(value);
     }
 
-    strength = MAX(0.0, MIN(100.0, strength));
-
-    return @(strength);
+    return @(B3MSnapStrength(strength));
 }
 
 - (id)readActiveStrength:(PSSpecifier *)specifier
@@ -115,17 +221,33 @@ static CFStringRef const kB3MPreferencesChanged =
                           fallback:72.0];
 }
 
+- (NSString *)activeStrengthDisplay:(PSSpecifier *)specifier
+{
+    (void)specifier;
+
+    double strength =
+        [[self readActiveStrength:nil] doubleValue];
+
+    return [NSString stringWithFormat:@"%.0f%%", strength];
+}
+
 - (void)setActiveStrength:(id)value
                 specifier:(PSSpecifier *)specifier
 {
     (void)specifier;
 
-    double strength =
+    double rawValue =
         [value respondsToSelector:@selector(doubleValue)]
             ? [value doubleValue]
             : 0.0;
 
-    strength = MAX(0.0, MIN(100.0, strength));
+    double strength =
+        B3MSnapStrength(rawValue);
+
+    NSInteger step =
+        (NSInteger)lround(
+            strength / kB3MStrengthStep
+        );
 
     CFStringRef key =
         ([self b3mCurrentGlassStyle] == 0)
@@ -158,12 +280,28 @@ static CFStringRef const kB3MPreferencesChanged =
         NULL,
         true
     );
+
+    if (step != self.b3mLastHapticStep) {
+        [self.b3mSelectionFeedback selectionChanged];
+        [self.b3mSelectionFeedback prepare];
+
+        self.b3mLastHapticStep = step;
+
+        PSSpecifier *valueSpecifier =
+            [self b3mSpecifierWithIdentifier:
+                @"ActiveStrengthLabel"];
+
+        if (valueSpecifier) {
+            [self reloadSpecifier:valueSpecifier];
+        }
+    }
 }
 
 - (void)b3mUpdateActiveStrengthLabel
 {
     PSSpecifier *labelSpecifier =
-        [self b3mSpecifierWithIdentifier:@"ActiveStrengthLabel"];
+        [self b3mSpecifierWithIdentifier:
+            @"ActiveStrengthLabel"];
 
     if (!labelSpecifier) return;
 
@@ -186,12 +324,9 @@ static CFStringRef const kB3MPreferencesChanged =
         [specifier propertyForKey:@"key"];
 
     if ([key isEqualToString:@"GlassStyle"]) {
-        [self b3mUpdateActiveStrengthLabel];
+        self.b3mLastHapticStep = -1;
 
-        /*
-         * Refresh the two standard Preferences rows so the single slider
-         * immediately reads the newly selected style's saved strength.
-         */
+        [self b3mUpdateActiveStrengthLabel];
         [self reloadSpecifiers];
     }
 }
