@@ -30,6 +30,17 @@ jobs:
           bash -c "$(curl -fsSL https://raw.githubusercontent.com/roothide/theos/master/bin/install-theos)"
           echo "THEOS=${THEOS}" >> "$GITHUB_ENV"
 
+      - name: Install patched iOS 16.5 SDK
+        run: |
+          set -euxo pipefail
+          mkdir -p "$THEOS/sdks"
+          curl -L --fail --retry 3 \
+            -o /tmp/iPhoneOS16.5.sdk.tar.xz \
+            https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz
+          tar -xJf /tmp/iPhoneOS16.5.sdk.tar.xz -C "$THEOS/sdks"
+          test -d "$THEOS/sdks/iPhoneOS16.5.sdk"
+          test -e "$THEOS/sdks/iPhoneOS16.5.sdk/System/Library/PrivateFrameworks/Preferences.framework/Preferences.tbd"
+
       - name: Build RootHide package
         run: |
           set -euxo pipefail
