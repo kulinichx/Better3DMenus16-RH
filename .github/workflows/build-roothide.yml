@@ -52,6 +52,18 @@ jobs:
           plutil -lint better3dmenus16rhprefs/Resources/Info.plist
           test -f better3dmenus16rhprefs/Resources/Root.plist
           plutil -lint better3dmenus16rhprefs/Resources/Root.plist
+          test -f better3dmenus16rhprefs/Resources/icon.png
+          test -f better3dmenus16rhprefs/Resources/icon@2x.png
+          test -f better3dmenus16rhprefs/Resources/icon@3x.png
+          grep -q 'icon = icon.png;' layout/Library/PreferenceLoader/Preferences/Better3DMenus16RH.plist
+          grep -q 'isController = 1;' layout/Library/PreferenceLoader/Preferences/Better3DMenus16RH.plist
+          grep -q '<key>CFBundleExecutable</key>' better3dmenus16rhprefs/Resources/Info.plist
+          grep -q '<string>Better3DMenus16RHPrefs</string>' better3dmenus16rhprefs/Resources/Info.plist
+          grep -q '<key>NSPrincipalClass</key>' better3dmenus16rhprefs/Resources/Info.plist
+          grep -q '<string>B3MRootListController</string>' better3dmenus16rhprefs/Resources/Info.plist
+          ! grep -q 'minimumPressDuration' Tweak.xm
+          ! grep -q '%hook SBIconView' Tweak.xm
+          ! grep -q '%hook SBHIconView' Tweak.xm
 
       - name: Build RootHide package
         run: |
@@ -62,6 +74,6 @@ jobs:
       - name: Upload DEB
         uses: actions/upload-artifact@v4
         with:
-          name: Better3DMenus16-RH-v0.1.2
+          name: Better3DMenus16-RH-v0.1.4-safetyfix
           path: packages/*.deb
           if-no-files-found: error
