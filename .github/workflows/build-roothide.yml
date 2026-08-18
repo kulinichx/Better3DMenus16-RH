@@ -51,20 +51,20 @@ jobs:
           test -d "$THEOS/sdks/iPhoneOS16.5.sdk"
           test -e "$THEOS/sdks/iPhoneOS16.5.sdk/System/Library/PrivateFrameworks/Preferences.framework/Preferences.tbd"
 
-      - name: Validate v0.2.0 project inputs
+      - name: Validate v0.2.1 project inputs
         run: |
           set -euxo pipefail
 
           test -f Tweak.xm
           test -f Makefile
           test -f control
-          grep -q '^Version: 0.2.0$' control
+          grep -q '^Version: 0.2.1$' control
 
           plutil -lint Better3DMenus16RH.plist
           grep -q 'com.apple.springboard' Better3DMenus16RH.plist
 
           plutil -lint better3dmenus16rhprefs/Resources/Info.plist
-          grep -q '<string>0.2.0</string>' better3dmenus16rhprefs/Resources/Info.plist
+          grep -q '<string>0.2.1</string>' better3dmenus16rhprefs/Resources/Info.plist
           grep -q '<string>Better3DMenus16RHPrefs</string>' better3dmenus16rhprefs/Resources/Info.plist
           grep -q '<string>B3MRootListController</string>' better3dmenus16rhprefs/Resources/Info.plist
 
@@ -106,6 +106,6 @@ jobs:
       - name: Upload DEB
         uses: actions/upload-artifact@v4
         with:
-          name: Better3DMenus16-RH-v0.2.0-RootHide
+          name: Better3DMenus16-RH-v0.2.1-RootHide
           path: packages/*.deb
           if-no-files-found: error
