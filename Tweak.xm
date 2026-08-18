@@ -381,17 +381,32 @@ static UIImage *B3MCreateMenuOpticalLightingImage(CGSize size,
     CGFloat e =
         B3MSpecularResponse(strength);
 
+    /*
+     * The GlassFolders opened panel is much larger than a Context Menu.
+     * Preserve its optical response/gains, but scale physical rail widths so
+     * the reflection reads as the same thin glass edge at menu size.
+     */
+    const CGFloat menuOpticalGeometryScale = 0.72;
+
     CGFloat shoulderWidth =
-        (6.2 + 1.8 * e) * renderScale;
+        (6.2 + 1.8 * e) *
+        menuOpticalGeometryScale *
+        renderScale;
 
     CGFloat coreWidth =
-        (1.30 + 0.34 * e) * renderScale;
+        (1.30 + 0.34 * e) *
+        menuOpticalGeometryScale *
+        renderScale;
 
     CGFloat filamentWidth =
-        (0.62 + 0.12 * e) * renderScale;
+        (0.62 + 0.12 * e) *
+        menuOpticalGeometryScale *
+        renderScale;
 
     CGFloat secondaryRimWidth =
-        (0.78 + 0.12 * e) * renderScale;
+        (0.78 + 0.12 * e) *
+        menuOpticalGeometryScale *
+        renderScale;
 
     CGFloat secondaryRimGain =
         darkAppearance
@@ -399,10 +414,14 @@ static UIImage *B3MCreateMenuOpticalLightingImage(CGSize size,
             : (0.082 + 0.030 * e);
 
     CGFloat darkShoulderCenter =
-        (2.8 + 0.5 * e) * renderScale;
+        (2.8 + 0.5 * e) *
+        menuOpticalGeometryScale *
+        renderScale;
 
     CGFloat darkShoulderWidth =
-        (2.4 + 0.5 * e) * renderScale;
+        (2.4 + 0.5 * e) *
+        menuOpticalGeometryScale *
+        renderScale;
 
     CGFloat darkShoulderGain =
         darkAppearance
@@ -537,10 +556,14 @@ static UIImage *B3MCreateMenuOpticalLightingImage(CGSize size,
              * clip, matching GlassFolders-Test3's Liquid Glass opened panel.
              */
             CGFloat filamentInset =
-                0.78 * renderScale;
+                0.78 *
+                menuOpticalGeometryScale *
+                renderScale;
 
             CGFloat secondaryInset =
-                0.82 * renderScale;
+                0.82 *
+                menuOpticalGeometryScale *
+                renderScale;
 
             CGFloat filamentRatio =
                 fabs(
@@ -1695,9 +1718,10 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
 
     if (isBackdropLayer) {
         /*
-         * Keep the menu's currently accepted Light/Dark body calibration.
-         * Only the sampling architecture and true optical layer are imported
-         * from GlassFolders here, so readability does not regress.
+         * GlassFolders-Test3 Liquid Glass body recipe.
+         *
+         * Keep wallpaper chroma/transmission as the material source in BOTH
+         * appearances. Do not compensate Light mode with a milky white body.
          */
         CGFloat blurRadius =
             darkAppearance
@@ -1707,8 +1731,8 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
                     materialResponse
                 )
                 : (
-                    4.2 +
-                    3.6 *
+                    2.6 +
+                    2.8 *
                     materialResponse
                 );
 
@@ -1720,8 +1744,8 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
                     materialResponse
                 )
                 : (
-                    0.900 +
-                    0.080 *
+                    1.110 +
+                    0.220 *
                     materialResponse
                 );
 
@@ -1733,8 +1757,8 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
                     materialResponse
                 )
                 : (
-                    0.050 +
-                    0.040 *
+                    0.026 +
+                    0.030 *
                     materialResponse
                 );
 
@@ -1746,8 +1770,8 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
                     materialResponse
                 )
                 : (
-                    0.985 +
-                    0.015 *
+                    0.975 +
+                    0.025 *
                     materialResponse
                 );
 
@@ -1874,31 +1898,31 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
     }
 
     /*
-     * Preserve the current accepted menu body tint. The Liquid Glass optical
-     * texture itself is neutral-white/black and introduces no hue.
+     * GlassFolders Liquid Glass is colorless. Hue comes from the live
+     * wallpaper/backdrop; only a very small neutral-white optical lift is used.
      */
     self.b3mTintView.backgroundColor =
-        B3MGlassBodyTintColor(self);
+        UIColor.whiteColor;
 
-    CGFloat iconTintAlpha =
+    CGFloat neutralLift =
         darkAppearance
             ? (
-                0.045 +
-                0.075 *
+                0.030 +
+                0.050 *
                 tintResponse
-            )
+            ) * self.b3mStrength
             : (
-                0.085 +
-                0.055 *
+                0.002 +
+                0.006 *
                 tintResponse
-            );
+            ) * self.b3mStrength;
 
     self.b3mTintView.alpha =
         MIN(
             darkAppearance
-                ? 0.105
-                : 0.125,
-            iconTintAlpha
+                ? 0.055
+                : 0.008,
+            neutralLift
         );
 
     /*
@@ -1921,8 +1945,8 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
 
     self.layer.borderWidth =
         darkAppearance
-            ? 0.42
-            : 0.34;
+            ? 0.24
+            : 0.20;
 
     self.layer.borderColor =
         [UIColor
