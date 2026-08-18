@@ -27,6 +27,8 @@ static char kB3MBlurAlphaKey;
 static char kB3MTextCapturedKey;
 static char kB3MTextColorKey;
 static char kB3MGlassMaterialKey;
+static char kB3MStockSubviewWasHiddenKey;
+static char kB3MStockSubviewOriginalHiddenKey;
 
 static BOOL B3MReadBool(CFStringRef key, BOOL fallback)
 {
@@ -772,44 +774,69 @@ static B3MMenuGlassView *B3MGlassMaterialForBackgroundView(
     return material;
 }
 
+
+static void B3MSetStockBackgroundSubviewSuppressed(UIView *subview, BOOL suppressed)
+{
+    if (!subview || [subview isKindOfClass:B3MMenuGlassView.class]) return;
+
+    NSNumber *marker = objc_getAssociatedObject(subview, &kB3MStockSubviewWasHiddenKey);
+
+    if (suppressed) {
+        if (![marker boolValue]) {
+            objc_setAssociatedObject(subview, &kB3MStockSubviewOriginalHiddenKey, @(subview.hidden), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(subview, &kB3MStockSubviewWasHiddenKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        subview.hidden = YES;
+    } else if ([marker boolValue]) {
+        NSNumber *originalHidden = objc_getAssociatedObject(subview, &kB3MStockSubviewOriginalHiddenKey);
+        subview.hidden = originalHidden ? originalHidden.boolValue : NO;
+        objc_setAssociatedObject(subview, &kB3MStockSubviewWasHiddenKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(subview, &kB3MStockSubviewOriginalHiddenKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
+
 static void B3MApplyGlassBackground(UIView *backgroundView)
 {
     if (!backgroundView) return;
 
-    B3MMenuGlassView *material =
-        B3MGlassMaterialForBackgroundView(
-            backgroundView,
-            gB3MGlassMenuTint
-        );
+    B3MMenuGlassView *material = B3MGlassMaterialForBackgroundView(backgroundView, NO);
 
     if (!gB3MGlassMenuTint) {
         if (material) {
             [material removeFromSuperview];
-
-            objc_setAssociatedObject(
-                backgroundView,
-                &kB3MGlassMaterialKey,
-                nil,
-                OBJC_ASSOCIATION_RETAIN_NONATOMIC
-            );
+            objc_setAssociatedObject(backgroundView, &kB3MGlassMaterialKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
-
+        for (UIView *subview in backgroundView.subviews) {
+            B3MSetStockBackgroundSubviewSuppressed(subview, NO);
+        }
         return;
     }
 
-    material.frame = backgroundView.bounds;
+    /*
+     * GlassFolders' important takeover step: keep Apple's private material
+     * objects alive but hide their visual output. Without this, our glass sits
+     * underneath the stock Context Menu material and looks almost unchanged.
+     */
+    backgroundView.backgroundColor = UIColor.clearColor;
 
-    CGFloat radius = backgroundView.layer.cornerRadius;
-
-    if (radius <= 0.0) {
-        radius = 14.0;
+    for (UIView *subview in backgroundView.subviews) {
+        if (subview != material) {
+            B3MSetStockBackgroundSubviewSuppressed(subview, YES);
+        }
     }
 
+    if (!material) {
+        material = B3MGlassMaterialForBackgroundView(backgroundView, YES);
+    } else if (material.superview != backgroundView) {
+        [material removeFromSuperview];
+        [backgroundView addSubview:material];
+    }
+
+    material.frame = backgroundView.bounds;
+    CGFloat radius = backgroundView.layer.cornerRadius;
+    if (radius <= 0.0) radius = 14.0;
     material.b3mPreferredRadius = radius;
-
-    // Refresh the weak icon tint whenever the active app changes.
     [material b3mRefreshMaterial];
-
     [backgroundView bringSubviewToFront:material];
 }
 
@@ -1207,23 +1234,40 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 
 %hook _UIElasticContextMenuBackgroundView
 
+- (void)didAddSubview:(UIView *)subview
+{
+    %orig(subview);
+    if (gB3MGlassMenuTint && ![subview isKindOfClass:B3MMenuGlassView.class]) {
+        B3MSetStockBackgroundSubviewSuppressed(subview, YES);
+    }
+}
+
 - (void)didMoveToWindow
 {
     %orig;
-    B3MApplyBlurRecursively((UIView *)self, YES);
     B3MApplyGlassBackground((UIView *)self);
 }
 
 - (void)layoutSubviews
 {
     %orig;
-    B3MApplyBlurRecursively((UIView *)self, YES);
     B3MApplyGlassBackground((UIView *)self);
+}
+
+- (void)setBackgroundColor:(UIColor *)color
+{
+    if (gB3MGlassMenuTint) {
+        %orig(UIColor.clearColor);
+    } else {
+        %orig(color);
+    }
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
 {
     %orig(previousTraitCollection);
+    B3MMenuGlassView *material = B3MGlassMaterialForBackgroundView((UIView *)self, NO);
+    if (material) [material b3mRefreshMaterial];
     B3MApplyGlassBackground((UIView *)self);
 }
 

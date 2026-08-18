@@ -88,7 +88,7 @@
 			<key>label</key>
 			<string>Glass</string>
 			<key>footerText</key>
-			<string>Glass follows the pressed app color. Light and Dark modes are tuned separately.</string>
+			<string>Liquid Glass replaces the stock menu material. App color remains a subtle accent.</string>
 		</dict>
 		<dict>
 			<key>PostNotification</key>
@@ -102,7 +102,7 @@
 			<key>key</key>
 			<string>GlassMenuTint</string>
 			<key>label</key>
-			<string>Dynamic App Glass</string>
+			<string>Liquid Glass</string>
 		</dict>
 		<dict>
 			<key>PostNotification</key>
@@ -116,7 +116,7 @@
 			<key>key</key>
 			<string>GlassTextTint</string>
 			<key>label</key>
-			<string>Adaptive Text Color</string>
+			<string>Adaptive Text</string>
 		</dict>
 	</array>
 </dict>
