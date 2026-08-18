@@ -1,7 +1,10 @@
 #import "B3MRootListController.h"
 #import <Preferences/PSSpecifier.h>
+#import <Preferences/PSControlTableCell.h>
+#import <Preferences/PSSliderTableCell.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <UIKit/UIKit.h>
+#import <math.h>
 
 static CFStringRef const kB3MPrefsDomain =
     CFSTR("com.kulinichx.better3dmenus16rh");
@@ -21,16 +24,6 @@ static double B3MSnapStrength(double value)
 
     return MAX(0.0, MIN(100.0, snapped));
 }
-
-@interface PSControlTableCell : UITableViewCell
-- (UIControl *)control;
-@end
-
-@interface PSSliderTableCell : PSControlTableCell
-- (instancetype)initWithStyle:(UITableViewCellStyle)style
-              reuseIdentifier:(NSString *)reuseIdentifier
-                    specifier:(PSSpecifier *)specifier;
-@end
 
 @interface PSListController (B3MReloadSpecifier)
 - (void)reloadSpecifier:(PSSpecifier *)specifier;
