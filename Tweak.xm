@@ -471,9 +471,13 @@ static UIColor *B3MGlassBodyTintColor(UIView *view)
         s = MIN(0.58, MAX(0.22, s * 0.62));
         v = MIN(0.78, MAX(0.48, v * 0.88));
     } else {
-        // Light glass gets a quieter tint; material transmission stays dominant.
-        s = MIN(0.42, MAX(0.14, s * 0.46));
-        v = MIN(0.68, MAX(0.42, v * 0.76));
+        /*
+         * Light mode needs a stable luminance floor for black text. Keep only
+         * a trace of the active icon hue and move the body tint close to white.
+         * The live backdrop still supplies the wallpaper/app colour.
+         */
+        s = MIN(0.10, MAX(0.035, s * 0.12));
+        v = 0.985;
     }
 
     return [UIColor colorWithHue:h saturation:s brightness:v alpha:1.0];
@@ -487,16 +491,15 @@ static UIColor *B3MGlassTextColorForView(UIView *view)
     [base getHue:&h saturation:&s brightness:&v alpha:&alpha];
 
     if (B3MUsesDarkAppearance(view)) {
-        // Mostly neutral-white with only a small hue cue.
-        s = MIN(0.24, MAX(0.08, s * 0.28));
-        v = 0.98;
-    } else {
-        // Dark same-hue text in Light Mode; avoids the old fluorescent labels.
-        s = MIN(0.48, MAX(0.20, s * 0.52));
-        v = 0.29;
+        /*
+         * Keep action labels neutral. Colour from the sampled backdrop should
+         * read through the glass body, not through the glyphs themselves.
+         */
+        return [UIColor colorWithWhite:0.985 alpha:0.98];
     }
 
-    return [UIColor colorWithHue:h saturation:s brightness:v alpha:1.0];
+    // Stable high-contrast foreground for the brighter Light glass profile.
+    return [UIColor colorWithWhite:0.075 alpha:0.96];
 }
 
 static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
@@ -594,19 +597,19 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
          */
         CGFloat blurRadius = darkAppearance
             ? (4.6 + 4.8 * materialResponse)
-            : (2.6 + 2.8 * materialResponse);
+            : (4.2 + 3.6 * materialResponse);
 
         CGFloat saturation = darkAppearance
             ? (1.070 + 0.120 * materialResponse)
-            : (1.110 + 0.220 * materialResponse);
+            : (0.900 + 0.080 * materialResponse);
 
         CGFloat brightness = darkAppearance
             ? (0.015 + 0.025 * materialResponse)
-            : (0.026 + 0.030 * materialResponse);
+            : (0.050 + 0.040 * materialResponse);
 
         CGFloat sampleAlpha = darkAppearance
             ? (0.90 + 0.08 * materialResponse)
-            : (0.975 + 0.025 * materialResponse);
+            : (0.985 + 0.015 * materialResponse);
 
         id saturate = B3MCreateCAFilter(@"colorSaturate");
         id brighten = B3MCreateCAFilter(@"colorBrightness");
@@ -671,10 +674,10 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
 
     CGFloat iconTintAlpha = darkAppearance
         ? (0.045 + 0.075 * tintResponse)
-        : (0.018 + 0.032 * tintResponse);
+        : (0.085 + 0.055 * tintResponse);
 
     self.b3mTintView.alpha =
-        MIN(darkAppearance ? 0.105 : 0.040, iconTintAlpha);
+        MIN(darkAppearance ? 0.105 : 0.125, iconTintAlpha);
 
     /*
      * GlassFolders continuity-edge parameters. Specular and edge responses
@@ -683,9 +686,9 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
      */
     CGFloat continuityAlpha = darkAppearance
         ? (0.022 + 0.022 * edgeResponse + 0.012 * specularResponse)
-        : (0.006 + 0.008 * edgeResponse + 0.004 * specularResponse);
+        : (0.028 + 0.028 * edgeResponse + 0.014 * specularResponse);
 
-    self.layer.borderWidth = darkAppearance ? 0.42 : 0.34;
+    self.layer.borderWidth = darkAppearance ? 0.42 : 0.44;
     self.layer.borderColor =
         [UIColor colorWithWhite:1.0
                           alpha:B3MClamp01(continuityAlpha)].CGColor;
