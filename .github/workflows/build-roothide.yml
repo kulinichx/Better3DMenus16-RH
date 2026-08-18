@@ -16,12 +16,21 @@ on:
 jobs:
   build:
     runs-on: macos-14
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Select Xcode 15.4
         run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+
+      - name: Install build dependencies
+        run: |
+          set -euxo pipefail
+          brew install ldid dpkg
+          command -v ldid
+          command -v dpkg-deb
+          ldid -h >/dev/null 2>&1 || true
 
       - name: Install RootHide Theos
         env:
@@ -35,25 +44,47 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p "$THEOS/sdks"
-          curl -L --fail --retry 3 \
+          curl -L --fail --retry 5 --retry-delay 3 \
             -o /tmp/iPhoneOS16.5.sdk.tar.xz \
             https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz
           tar -xJf /tmp/iPhoneOS16.5.sdk.tar.xz -C "$THEOS/sdks"
           test -d "$THEOS/sdks/iPhoneOS16.5.sdk"
           test -e "$THEOS/sdks/iPhoneOS16.5.sdk/System/Library/PrivateFrameworks/Preferences.framework/Preferences.tbd"
 
-      - name: Validate project inputs
+      - name: Validate v0.1.9 project inputs
         run: |
           set -euxo pipefail
-          test -f Better3DMenus16RH.plist
+
+          test -f Tweak.xm
+          test -f Makefile
+          test -f control
+          grep -q '^Version: 0.1.9$' control
+
           plutil -lint Better3DMenus16RH.plist
           grep -q 'com.apple.springboard' Better3DMenus16RH.plist
 
-          test -f better3dmenus16rhprefs/Resources/Info.plist
           plutil -lint better3dmenus16rhprefs/Resources/Info.plist
+          grep -q '<string>0.1.9</string>' better3dmenus16rhprefs/Resources/Info.plist
+          grep -q '<string>Better3DMenus16RHPrefs</string>' better3dmenus16rhprefs/Resources/Info.plist
+          grep -q '<string>B3MRootListController</string>' better3dmenus16rhprefs/Resources/Info.plist
 
-          test -f better3dmenus16rhprefs/Resources/Root.plist
           plutil -lint better3dmenus16rhprefs/Resources/Root.plist
+          grep -q '<string>HideRemoveApp</string>' better3dmenus16rhprefs/Resources/Root.plist
+          grep -q '<string>HideSectionGap</string>' better3dmenus16rhprefs/Resources/Root.plist
+          grep -q '<string>GlassMenuTint</string>' better3dmenus16rhprefs/Resources/Root.plist
+          grep -q '<string>GlassTextTint</string>' better3dmenus16rhprefs/Resources/Root.plist
+
+          grep -q 'gB3MHideRemoveApp' Tweak.xm
+          grep -q 'gB3MHideSectionGap' Tweak.xm
+          grep -q 'B3MDominantColorFromImage' Tweak.xm
+          grep -q 'windowScene.windows' Tweak.xm
+
+          ! grep -q 'application.windows' Tweak.xm
+          ! grep -q 'minimumPressDuration' Tweak.xm
+          ! grep -q 'UILongPressGestureRecognizer' Tweak.xm
+          ! grep -q '%hook SBIconView' Tweak.xm
+          ! grep -q '%hook SBHIconView' Tweak.xm
+          ! grep -q '%hook UILabel' Tweak.xm
 
           test -f better3dmenus16rhprefs/Resources/icon.png
           test -f better3dmenus16rhprefs/Resources/icon@2x.png
@@ -62,25 +93,16 @@ jobs:
           grep -q 'icon = icon.png;' layout/Library/PreferenceLoader/Preferences/Better3DMenus16RH.plist
           grep -q 'isController = 1;' layout/Library/PreferenceLoader/Preferences/Better3DMenus16RH.plist
 
-          grep -q '<key>CFBundleExecutable</key>' better3dmenus16rhprefs/Resources/Info.plist
-          grep -q '<string>Better3DMenus16RHPrefs</string>' better3dmenus16rhprefs/Resources/Info.plist
-
-          grep -q '<key>NSPrincipalClass</key>' better3dmenus16rhprefs/Resources/Info.plist
-          grep -q '<string>B3MRootListController</string>' better3dmenus16rhprefs/Resources/Info.plist
-
-          ! grep -q 'minimumPressDuration' Tweak.xm
-          ! grep -q '%hook SBIconView' Tweak.xm
-          ! grep -q '%hook SBHIconView' Tweak.xm
-
       - name: Build RootHide package
         run: |
           set -euxo pipefail
           make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
           ls -lah packages
+          test -n "$(find packages -maxdepth 1 -name '*.deb' -print -quit)"
 
       - name: Upload DEB
         uses: actions/upload-artifact@v4
         with:
-          name: Better3DMenus16-RH-RootHide
+          name: Better3DMenus16-RH-v0.1.9-RootHide
           path: packages/*.deb
           if-no-files-found: error
