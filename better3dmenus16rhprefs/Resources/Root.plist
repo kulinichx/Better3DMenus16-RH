@@ -88,7 +88,7 @@
 			<key>label</key>
 			<string>Glass</string>
 			<key>footerText</key>
-			<string>Replaces the live Context Menu material using the GlassFolders-derived backdrop recipe.</string>
+			<string>Choose Clear or Liquid Glass. Each style keeps its own strength.</string>
 		</dict>
 		<dict>
 			<key>PostNotification</key>
@@ -102,7 +102,71 @@
 			<key>key</key>
 			<string>GlassMenuTint</string>
 			<key>label</key>
-			<string>GlassFolders Material</string>
+			<string>Glass Effect</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+			<key>cell</key>
+			<string>PSLinkListCell</string>
+			<key>default</key>
+			<integer>1</integer>
+			<key>defaults</key>
+			<string>com.kulinichx.better3dmenus16rh</string>
+			<key>key</key>
+			<string>GlassStyle</string>
+			<key>label</key>
+			<string>Style</string>
+			<key>validTitles</key>
+			<array>
+				<string>Clear</string>
+				<string>Liquid Glass</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>0</integer>
+				<integer>1</integer>
+			</array>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<integer>55</integer>
+			<key>defaults</key>
+			<string>com.kulinichx.better3dmenus16rh</string>
+			<key>key</key>
+			<string>ClearStrength</string>
+			<key>label</key>
+			<string>Clear Strength</string>
+			<key>min</key>
+			<integer>0</integer>
+			<key>max</key>
+			<integer>100</integer>
+			<key>showValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>default</key>
+			<integer>72</integer>
+			<key>defaults</key>
+			<string>com.kulinichx.better3dmenus16rh</string>
+			<key>key</key>
+			<string>LiquidGlassStrength</string>
+			<key>label</key>
+			<string>Liquid Glass Strength</string>
+			<key>min</key>
+			<integer>0</integer>
+			<key>max</key>
+			<integer>100</integer>
+			<key>showValue</key>
+			<true/>
 		</dict>
 		<dict>
 			<key>PostNotification</key>

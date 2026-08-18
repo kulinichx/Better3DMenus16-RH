@@ -14,8 +14,21 @@ static BOOL gB3MReduceBlur = YES;
 static BOOL gB3MHideShareApp = YES;
 static BOOL gB3MHideRemoveApp = YES;
 static BOOL gB3MHideSectionGap = NO;
-static BOOL gB3MGlassMenuTint = NO;
-static BOOL gB3MGlassTextTint = NO;
+static BOOL gB3MGlassMenuTint = YES;
+static BOOL gB3MGlassTextTint = YES;
+
+/*
+ * Glass style:
+ *   0 = Clear
+ *   1 = Liquid Glass
+ *
+ * Keep Liquid Glass as the migration default because that is the material
+ * already shipped by the current Better3DMenus build.
+ */
+static NSInteger gB3MGlassStyle = 1;
+static CGFloat gB3MClearStrength = 0.55;
+static CGFloat gB3MLiquidGlassStrength = 0.72;
+
 static CGFloat gB3MBlurFactor = 0.55;
 static UIColor *gB3MActiveIconColor = nil;
 
@@ -52,6 +65,34 @@ static BOOL B3MReadBool(CFStringRef key, BOOL fallback)
     return result;
 }
 
+static NSInteger B3MReadInteger(CFStringRef key, NSInteger fallback)
+{
+    CFPropertyListRef value =
+        CFPreferencesCopyAppValue(
+            key,
+            kB3MPrefsDomain
+        );
+
+    if (!value) return fallback;
+
+    NSInteger result = fallback;
+
+    if (CFGetTypeID(value) == CFNumberGetTypeID()) {
+        long long number = (long long)fallback;
+
+        if (CFNumberGetValue(
+                (CFNumberRef)value,
+                kCFNumberLongLongType,
+                &number)) {
+            result = (NSInteger)number;
+        }
+    }
+
+    CFRelease(value);
+    return result;
+}
+
+
 static double B3MReadDouble(CFStringRef key, double fallback, double minimum, double maximum)
 {
     CFPropertyListRef value = CFPreferencesCopyAppValue(key, kB3MPrefsDomain);
@@ -80,8 +121,36 @@ static void B3MLoadPreferences(void)
     gB3MHideShareApp = B3MReadBool(CFSTR("HideShareApp"), YES);
     gB3MHideRemoveApp = B3MReadBool(CFSTR("HideRemoveApp"), YES);
     gB3MHideSectionGap = B3MReadBool(CFSTR("HideSectionGap"), NO);
-    gB3MGlassMenuTint = B3MReadBool(CFSTR("GlassMenuTint"), NO);
-    gB3MGlassTextTint = B3MReadBool(CFSTR("GlassTextTint"), NO);
+    gB3MGlassMenuTint = B3MReadBool(CFSTR("GlassMenuTint"), YES);
+    gB3MGlassTextTint = B3MReadBool(CFSTR("GlassTextTint"), YES);
+
+    gB3MGlassStyle =
+        B3MReadInteger(
+            CFSTR("GlassStyle"),
+            1
+        );
+
+    if (gB3MGlassStyle < 0 ||
+        gB3MGlassStyle > 1) {
+        gB3MGlassStyle = 1;
+    }
+
+    gB3MClearStrength =
+        (CGFloat)B3MReadDouble(
+            CFSTR("ClearStrength"),
+            55.0,
+            0.0,
+            100.0
+        ) / 100.0;
+
+    gB3MLiquidGlassStrength =
+        (CGFloat)B3MReadDouble(
+            CFSTR("LiquidGlassStrength"),
+            72.0,
+            0.0,
+            100.0
+        ) / 100.0;
+
     gB3MBlurFactor = (CGFloat)B3MReadDouble(CFSTR("BlurFactor"), 0.55, 0.20, 1.00);
 }
 
@@ -204,6 +273,30 @@ static inline CGFloat B3MEdgeResponse(CGFloat strength)
     return 0.12 * s + 0.88 * pow(s, 1.80);
 }
 
+/*
+ * GlassFolders-Test3 Clear contract:
+ * strength primarily controls local blur/structure while the material remains
+ * a high-transmission clear sheet even near 0%.
+ */
+static inline CGFloat B3MClearOpenedBlurResponse(CGFloat strength)
+{
+    return pow(B3MClamp01(strength), 1.15);
+}
+
+static inline CGFloat B3MClearStructureResponse(CGFloat strength)
+{
+    CGFloat s = B3MClamp01(strength);
+    return s * s * (3.0 - 2.0 * s);
+}
+
+static inline CGFloat B3MActiveGlassStrength(void)
+{
+    return (gB3MGlassStyle == 0)
+        ? gB3MClearStrength
+        : gB3MLiquidGlassStrength;
+}
+
+
 static BOOL B3MUsesDarkAppearance(UIView *view)
 {
     UIUserInterfaceStyle style = UIUserInterfaceStyleUnspecified;
@@ -271,82 +364,60 @@ static NSCache *B3MOpticalLightingCache(void)
 }
 
 static UIImage *B3MCreateMenuOpticalLightingImage(CGSize size,
-                                                   CGFloat cornerRadius,
-                                                   CGFloat strength,
-                                                   BOOL darkAppearance)
-{
+                                                 CGFloat cornerRadius,
+                                                 CGFloat strength,
+                                                 NSInteger style,
+                                                 BOOL darkAppearance) {
     if (size.width < 2.0 ||
         size.height < 2.0 ||
-        strength <= 0.001) {
+        (style != 0 && strength <= 0.001)) {
         return nil;
     }
 
     /*
-     * GlassFolders uses 1.5x for the large opened panel. Keep that exact
-     * sampling scale here: it resolves the thin filament well on @3x devices
-     * while keeping the cached Context Menu texture inexpensive.
+     * The opened panel uses broader light bands than the desktop icon.
+     * 1.5x is enough for the thin filament while avoiding a multi-megabyte
+     * 3x render for every large folder page.
      */
-    CGFloat renderScale =
-        MIN(UIScreen.mainScreen.scale, 1.50);
+    CGFloat renderScale = MIN(UIScreen.mainScreen.scale, 1.50);
 
     size_t pixelWidth =
-        (size_t)MAX(
-            2.0,
-            floor(size.width * renderScale + 0.5)
-        );
-
+        (size_t)MAX(2.0, floor(size.width * renderScale + 0.5));
     size_t pixelHeight =
-        (size_t)MAX(
-            2.0,
-            floor(size.height * renderScale + 0.5)
-        );
+        (size_t)MAX(2.0, floor(size.height * renderScale + 0.5));
 
     NSInteger strengthStep =
-        MAX(
-            0,
-            MIN(
-                20,
-                (NSInteger)lround(strength * 20.0)
-            )
-        );
+        MAX(0, MIN(20, (NSInteger)lround(strength * 20.0)));
 
-    NSString *cacheKey =
-        [NSString stringWithFormat:
-            @"B3M-LG-P24-%@-%zux%zu-r%.2f-s%ld",
-            darkAppearance ? @"D" : @"L",
-            pixelWidth,
-            pixelHeight,
-            cornerRadius,
-            (long)strengthStep
-        ];
+    NSString *cacheKey = [NSString stringWithFormat:
+        @"P24-%@-%@-%zux%zu-r%.2f-s%ld",
+        (style == 1) ? @"LG" : @"CL",
+        darkAppearance ? @"D" : @"L",
+        pixelWidth,
+        pixelHeight,
+        cornerRadius,
+        (long)strengthStep
+    ];
 
-    NSCache *cache =
-        B3MOpticalLightingCache();
-
-    UIImage *cached =
-        [cache objectForKey:cacheKey];
+    NSCache *cache = B3MOpticalLightingCache();
+    UIImage *cached = [cache objectForKey:cacheKey];
 
     if (cached) {
         return cached;
     }
 
-    CGColorSpaceRef colorSpace =
-        CGColorSpaceCreateDeviceRGB();
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    size_t bytesPerRow = pixelWidth * 4;
 
-    size_t bytesPerRow =
-        pixelWidth * 4;
-
-    CGContextRef context =
-        CGBitmapContextCreate(
-            NULL,
-            pixelWidth,
-            pixelHeight,
-            8,
-            bytesPerRow,
-            colorSpace,
-            kCGImageAlphaPremultipliedLast |
-                kCGBitmapByteOrder32Big
-        );
+    CGContextRef context = CGBitmapContextCreate(
+        NULL,
+        pixelWidth,
+        pixelHeight,
+        8,
+        bytesPerRow,
+        colorSpace,
+        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
+    );
 
     CGColorSpaceRelease(colorSpace);
 
@@ -362,130 +433,126 @@ static UIImage *B3MCreateMenuOpticalLightingImage(CGSize size,
         return nil;
     }
 
-    CGFloat width =
-        (CGFloat)pixelWidth;
+    CGFloat width = (CGFloat)pixelWidth;
+    CGFloat height = (CGFloat)pixelHeight;
+    CGFloat radius = MAX(0.0, cornerRadius * renderScale);
 
-    CGFloat height =
-        (CGFloat)pixelHeight;
-
-    CGFloat radius =
-        MAX(
-            0.0,
-            cornerRadius * renderScale
-        );
+    BOOL clearStyle = (style == 0);
+    CGFloat clearStructure = clearStyle
+        ? B3MClearStructureResponse(strength)
+        : 1.0;
 
     /*
-     * Liquid Glass coefficients are taken from GlassFolders-Test3's opened
-     * panel path (style == 1). Geometry is not approximated with a stroke.
+     * Clear always has a visible thin-glass edge, including at 0%.  Strength
+     * now adds edge definition instead of deciding whether the edge exists.
+     * The base remains softer than Liquid Glass.
      */
-    CGFloat e =
-        B3MSpecularResponse(strength);
+    CGFloat e = clearStyle
+        ? (0.50 + 0.20 * clearStructure)
+        : B3MSpecularResponse(strength);
 
     /*
-     * The GlassFolders opened panel is much larger than a Context Menu.
-     * Preserve its optical response/gains, but scale physical rail widths so
-     * the reflection reads as the same thin glass edge at menu size.
+     * Clear and Liquid Glass intentionally use different edge optics.
+     * Clear is a thin transparent sheet: a broader, softer white shoulder,
+     * very little hard filament, and almost no dark thickness shoulder.
+     * Liquid Glass keeps the existing narrower/high-energy rail.
+     *
+     * These are neutral-white optics only. No hue is introduced here.
+     */
+    /*
+     * Context Menu is much smaller than an opened folder. Preserve the exact
+     * Clear/Liquid response and rail topology, but reduce only physical band
+     * widths so the edge remains thin and crisp at menu scale.
      */
     const CGFloat menuOpticalGeometryScale = 0.72;
 
     CGFloat shoulderWidth =
-        (6.2 + 1.8 * e) *
-        menuOpticalGeometryScale *
-        renderScale;
+        (clearStyle
+            ? (10.4 + 2.6 * e)
+            : (6.2 + 1.8 * e)) *
+        menuOpticalGeometryScale * renderScale;
 
     CGFloat coreWidth =
-        (1.30 + 0.34 * e) *
-        menuOpticalGeometryScale *
-        renderScale;
+        (clearStyle
+            ? (2.00 + 0.40 * e)
+            : (1.30 + 0.34 * e)) *
+        menuOpticalGeometryScale * renderScale;
 
     CGFloat filamentWidth =
-        (0.62 + 0.12 * e) *
-        menuOpticalGeometryScale *
-        renderScale;
+        (clearStyle
+            ? (0.82 + 0.12 * e)
+            : (0.62 + 0.12 * e)) *
+        menuOpticalGeometryScale * renderScale;
 
     CGFloat secondaryRimWidth =
-        (0.78 + 0.12 * e) *
-        menuOpticalGeometryScale *
-        renderScale;
+        (clearStyle
+            ? (1.02 + 0.15 * e)
+            : (0.78 + 0.12 * e)) *
+        menuOpticalGeometryScale * renderScale;
 
-    CGFloat secondaryRimGain =
-        darkAppearance
+    CGFloat secondaryRimGain;
+    if (clearStyle) {
+        secondaryRimGain = darkAppearance
+            ? (0.034 + 0.014 * e)
+            : (0.026 + 0.011 * e);
+    } else {
+        secondaryRimGain = darkAppearance
             ? (0.092 + 0.032 * e)
             : (0.082 + 0.030 * e);
+    }
 
     CGFloat darkShoulderCenter =
-        (2.8 + 0.5 * e) *
-        menuOpticalGeometryScale *
-        renderScale;
+        (clearStyle
+            ? (3.15 + 0.55 * e)
+            : (2.8 + 0.5 * e)) *
+        menuOpticalGeometryScale * renderScale;
 
     CGFloat darkShoulderWidth =
-        (2.4 + 0.5 * e) *
-        menuOpticalGeometryScale *
-        renderScale;
+        (clearStyle
+            ? (3.00 + 0.60 * e)
+            : (2.4 + 0.5 * e)) *
+        menuOpticalGeometryScale * renderScale;
 
-    CGFloat darkShoulderGain =
-        darkAppearance
+    CGFloat darkShoulderGain;
+    if (clearStyle) {
+        darkShoulderGain = darkAppearance
+            ? (0.0010 + 0.0010 * e)
+            : (0.0030 + 0.0015 * e);
+    } else {
+        darkShoulderGain = darkAppearance
             ? (0.008 + 0.003 * e)
             : (0.010 + 0.005 * e);
+    }
 
-    const CGFloat invSqrt2 =
-        0.70710678118;
+    const CGFloat invSqrt2 = 0.70710678118;
+    const CGFloat lightX = -invSqrt2;
+    const CGFloat lightY = -invSqrt2;
 
-    const CGFloat lightX =
-        -invSqrt2;
-
-    const CGFloat lightY =
-        -invSqrt2;
-
-    CGFloat epsilon =
-        MAX(
-            0.70,
-            renderScale * 0.60
-        );
-
-    CGFloat aaWidth =
-        MAX(
-            0.90,
-            renderScale * 0.75
-        );
-
-    CGFloat edgeDrive =
-        B3MEdgeResponse(strength);
+    CGFloat epsilon = MAX(0.70, renderScale * 0.60);
+    CGFloat aaWidth = MAX(0.90, renderScale * 0.75);
 
     for (size_t py = 0; py < pixelHeight; py++) {
         for (size_t px = 0; px < pixelWidth; px++) {
-            CGFloat x =
-                (CGFloat)px + 0.5;
-
-            CGFloat y =
-                (CGFloat)py + 0.5;
+            CGFloat x = (CGFloat)px + 0.5;
+            CGFloat y = (CGFloat)py + 0.5;
 
             CGFloat sdf =
                 B3MRoundedRectSDF(
-                    x,
-                    y,
-                    width,
-                    height,
-                    radius
+                    x, y, width, height, radius
                 );
 
             CGFloat edgeCoverage =
-                B3MClamp01(
-                    0.5 - sdf / aaWidth
-                );
+                B3MClamp01(0.5 - sdf / aaWidth);
 
             if (edgeCoverage <= 0.001) {
                 continue;
             }
 
-            CGFloat insideDepth =
-                MAX(0.0, -sdf);
-
+            CGFloat insideDepth = MAX(0.0, -sdf);
             CGFloat maxBand =
                 MAX(
                     shoulderWidth * 3.0,
-                    darkShoulderCenter +
-                        darkShoulderWidth * 3.0
+                    darkShoulderCenter + darkShoulderWidth * 3.0
                 );
 
             if (insideDepth > maxBand) {
@@ -494,126 +561,95 @@ static UIImage *B3MCreateMenuOpticalLightingImage(CGSize size,
 
             CGFloat dx =
                 B3MRoundedRectSDF(
-                    x + epsilon,
-                    y,
-                    width,
-                    height,
-                    radius
+                    x + epsilon, y, width, height, radius
                 ) -
                 B3MRoundedRectSDF(
-                    x - epsilon,
-                    y,
-                    width,
-                    height,
-                    radius
+                    x - epsilon, y, width, height, radius
                 );
 
             CGFloat dy =
                 B3MRoundedRectSDF(
-                    x,
-                    y + epsilon,
-                    width,
-                    height,
-                    radius
+                    x, y + epsilon, width, height, radius
                 ) -
                 B3MRoundedRectSDF(
-                    x,
-                    y - epsilon,
-                    width,
-                    height,
-                    radius
+                    x, y - epsilon, width, height, radius
                 );
 
-            CGFloat normalLength =
-                hypot(dx, dy);
+            CGFloat normalLength = hypot(dx, dy);
 
             if (normalLength <= 0.0001) {
                 continue;
             }
 
-            CGFloat nx =
-                dx / normalLength;
+            CGFloat nx = dx / normalLength;
+            CGFloat ny = dy / normalLength;
 
-            CGFloat ny =
-                dy / normalLength;
-
-            CGFloat ndotl =
-                nx * lightX + ny * lightY;
-
-            CGFloat opposite =
-                MAX(0.0, -ndotl);
+            CGFloat ndotl = nx * lightX + ny * lightY;
+            CGFloat opposite = MAX(0.0, -ndotl);
 
             CGFloat shoulderRatio =
-                insideDepth /
-                MAX(0.001, shoulderWidth);
+                insideDepth / MAX(0.001, shoulderWidth);
 
             CGFloat coreRatio =
-                insideDepth /
-                MAX(0.001, coreWidth);
+                insideDepth / MAX(0.001, coreWidth);
 
             /*
-             * Keep the filament slightly inside the native continuous-corner
-             * clip, matching GlassFolders-Test3's Liquid Glass opened panel.
+             * Beta 2.1: keep the directional optical filament slightly
+             * INSIDE the host's native continuous-corner clip.  The host is
+             * kCACornerCurveContinuous (a squircle-like curve), while this
+             * lightweight CPU texture uses an analytic rounded-rect field.
+             * Centering the filament ~0.6-0.8 pt inward prevents the raster
+             * highlight from grazing the clip exactly at corner/edge tangents.
+             * A very low native CALayer border below provides the exact
+             * continuous-curve continuity floor.
              */
             CGFloat filamentInset =
-                0.78 *
-                menuOpticalGeometryScale *
-                renderScale;
+                ((style == 1) ? 0.78 : 0.58) *
+                menuOpticalGeometryScale * renderScale;
 
             CGFloat secondaryInset =
-                0.82 *
-                menuOpticalGeometryScale *
-                renderScale;
+                ((style == 1) ? 0.82 : 0.60) *
+                menuOpticalGeometryScale * renderScale;
 
             CGFloat filamentRatio =
-                fabs(
-                    insideDepth -
-                    filamentInset
-                ) /
+                fabs(insideDepth - filamentInset) /
                 MAX(0.001, filamentWidth);
 
             CGFloat secondaryRatio =
-                fabs(
-                    insideDepth -
-                    secondaryInset
-                ) /
-                MAX(
-                    0.001,
-                    secondaryRimWidth
-                );
+                fabs(insideDepth - secondaryInset) /
+                MAX(0.001, secondaryRimWidth);
 
             CGFloat shoulder =
-                exp(
-                    -(
-                        shoulderRatio *
-                        shoulderRatio
-                    )
-                );
+                exp(-(shoulderRatio * shoulderRatio));
 
             CGFloat core =
-                exp(
-                    -(
-                        coreRatio *
-                        coreRatio *
-                        1.30
-                    )
-                );
+                exp(-(coreRatio * coreRatio * 1.30));
 
             CGFloat filament =
-                exp(
-                    -pow(
-                        filamentRatio,
-                        2.55
-                    )
-                );
+                exp(-pow(filamentRatio, 2.55));
 
             CGFloat secondary =
-                exp(
-                    -pow(
-                        secondaryRatio,
-                        2.30
-                    )
-                );
+                exp(-pow(secondaryRatio, 2.30));
+
+            /*
+             * Beta 1.6 opened-panel continuous rails.
+             *
+             * The larger opened surface uses exactly the same optical
+             * topology as the closed folder:
+             *
+             *   primary:
+             *     upper-left rounded corner -> full top rail
+             *
+             *   secondary:
+             *     full bottom rail -> lower-right rounded corner
+             *
+             * Corner and straight segment inside each pair use one shared
+             * mask/gain so their brightness is continuous through the radius.
+             * The large panel is broader/softer, not differently organized.
+             */
+            CGFloat edgeDrive = clearStyle
+                ? (0.24 + 0.22 * clearStructure)
+                : B3MEdgeResponse(strength);
 
             CGFloat verticalEdge =
                 pow(fabs(nx), 2.32);
@@ -632,124 +668,89 @@ static UIImage *B3MCreateMenuOpticalLightingImage(CGSize size,
 
             CGFloat topRightCornerSelector =
                 B3MClamp01(
-                    2.05 *
-                    rightFacing *
-                    topFacing
+                    2.05 * rightFacing * topFacing
                 );
 
             CGFloat bottomLeftCornerSelector =
                 B3MClamp01(
-                    2.05 *
-                    leftFacing *
-                    bottomFacing
+                    2.05 * leftFacing * bottomFacing
                 );
 
             CGFloat topRightTransition =
-                pow(
-                    topRightCornerSelector,
-                    0.90
-                );
+                pow(topRightCornerSelector, 0.90);
 
             CGFloat bottomLeftTransition =
-                pow(
-                    bottomLeftCornerSelector,
-                    0.90
-                );
+                pow(bottomLeftCornerSelector, 0.90);
 
             CGFloat endpointRadius =
                 MAX(
                     1.0,
                     MIN(
                         radius,
-                        0.5 *
-                        MIN(width, height)
+                        0.5 * MIN(width, height)
                     )
                 );
 
             /*
-             * Symmetric continuous tangent rails:
-             *   primary   : top -> upper-left arc -> left tail
-             *   secondary : bottom -> lower-right arc -> right tail
+             * Beta 2.8 — locked symmetric continuous tangent rails.
+             *
+             * Do not splice a "corner mask" into a separate straight-edge
+             * mask. The SDF normal is already unit length, so in the owned
+             * upper-left quadrant:
+             *
+             *     hypot(topFacing, leftFacing) == 1
+             *
+             * from the top straight, through every point of the TL arc, to
+             * the left straight. The same identity holds for the mirrored
+             * lower-right quadrant. Using that invariant gives one energy-flat
+             * optical rail across BOTH tangents instead of pieces which only
+             * happen to overlap.
+             *
+             * Geometry is an exact 180-degree mirror:
+             *
+             *   primary   : top -> TL arc -> left tail
+             *   secondary : bottom -> BR arc -> right tail
+             *
+             * Dark/light appearance may change gain later, but never this
+             * geometry. The connection/fade relationship is therefore
+             * identical in both appearance modes.
              */
             CGFloat primaryQuadrantEnergy =
                 B3MClamp01(
-                    hypot(
-                        topFacing,
-                        leftFacing
-                    )
+                    hypot(topFacing, leftFacing)
                 );
 
             CGFloat secondaryQuadrantEnergy =
                 B3MClamp01(
-                    hypot(
-                        bottomFacing,
-                        rightFacing
-                    )
+                    hypot(bottomFacing, rightFacing)
                 );
 
-            CGFloat primaryTurn =
-                leftFacing /
-                MAX(
-                    0.001,
-                    topFacing +
-                    leftFacing
-                );
-
-            CGFloat secondaryTurn =
-                rightFacing /
-                MAX(
-                    0.001,
-                    bottomFacing +
-                    rightFacing
-                );
+            /*
+             * Do not hold the side tangent at exactly the same energy as the
+             * top/bottom rail and then suddenly begin fading.  Ease the last
+             * part of each owned corner by only 6%, then continue that same
+             * value into the long side tail.  This makes top->TL->left and
+             * bottom->BR->right feel like one reflection turning a corner.
+             */
+            CGFloat primaryTurn = leftFacing /
+                MAX(0.001, topFacing + leftFacing);
+            CGFloat secondaryTurn = rightFacing /
+                MAX(0.001, bottomFacing + rightFacing);
 
             CGFloat primaryTurnT =
-                B3MClamp01(
-                    (primaryTurn - 0.48) /
-                    0.52
-                );
-
+                B3MClamp01((primaryTurn - 0.48) / 0.52);
             CGFloat secondaryTurnT =
-                B3MClamp01(
-                    (secondaryTurn - 0.48) /
-                    0.52
-                );
+                B3MClamp01((secondaryTurn - 0.48) / 0.52);
 
             CGFloat primaryTurnSmooth =
-                primaryTurnT *
-                primaryTurnT *
-                primaryTurnT *
-                (
-                    primaryTurnT *
-                    (
-                        primaryTurnT * 6.0 -
-                        15.0
-                    ) +
-                    10.0
-                );
-
+                primaryTurnT * primaryTurnT * primaryTurnT *
+                (primaryTurnT * (primaryTurnT * 6.0 - 15.0) + 10.0);
             CGFloat secondaryTurnSmooth =
-                secondaryTurnT *
-                secondaryTurnT *
-                secondaryTurnT *
-                (
-                    secondaryTurnT *
-                    (
-                        secondaryTurnT * 6.0 -
-                        15.0
-                    ) +
-                    10.0
-                );
+                secondaryTurnT * secondaryTurnT * secondaryTurnT *
+                (secondaryTurnT * (secondaryTurnT * 6.0 - 15.0) + 10.0);
 
-            CGFloat primaryTurnGain =
-                1.0 -
-                0.060 *
-                primaryTurnSmooth;
-
-            CGFloat secondaryTurnGain =
-                1.0 -
-                0.060 *
-                secondaryTurnSmooth;
+            CGFloat primaryTurnGain = 1.0 - 0.060 * primaryTurnSmooth;
+            CGFloat secondaryTurnGain = 1.0 - 0.060 * secondaryTurnSmooth;
 
             CGFloat tangentOverlap =
                 MAX(
@@ -757,186 +758,121 @@ static UIImage *B3MCreateMenuOpticalLightingImage(CGSize size,
                     endpointRadius * 0.032
                 );
 
+            /*
+             * Apple-like turn-off: after the TL/BR tangent the reflection
+             * must breathe along the side instead of collapsing within half
+             * a radius.  The two sides are exact mirrors.
+             */
             CGFloat sideTailLength =
                 MAX(
                     22.0 * renderScale,
                     endpointRadius * 1.12
                 );
 
+            /*
+             * Keep full energy for a tiny distance AFTER each tangent. The
+             * fade begins only outside that overlap, so the tangent itself can
+             * never be a fade endpoint. This removes the hairline dip at
+             * TL<->top and BR<->bottom while preserving a natural side fade.
+             */
             CGFloat topEnvelope =
-                (y <=
-                    endpointRadius +
-                    tangentOverlap)
+                (y <= endpointRadius + tangentOverlap)
                     ? 1.0
                     : 0.0;
 
             CGFloat bottomEnvelope =
-                (y >=
-                    height -
-                    endpointRadius -
-                    tangentOverlap)
+                (y >= height - endpointRadius - tangentOverlap)
                     ? 1.0
                     : 0.0;
 
             CGFloat topLeftFadeStart =
-                endpointRadius +
-                tangentOverlap;
+                endpointRadius + tangentOverlap;
 
             CGFloat bottomRightFadeStart =
-                height -
-                endpointRadius -
-                tangentOverlap;
+                height - endpointRadius - tangentOverlap;
 
             CGFloat topLeftTailProgress =
                 B3MClamp01(
-                    (
-                        y -
-                        topLeftFadeStart
-                    ) /
-                    MAX(
-                        1.0,
-                        sideTailLength
-                    )
+                    (y - topLeftFadeStart) /
+                    MAX(1.0, sideTailLength)
                 );
 
             CGFloat bottomRightTailProgress =
                 B3MClamp01(
-                    (
-                        bottomRightFadeStart -
-                        y
-                    ) /
-                    MAX(
-                        1.0,
-                        sideTailLength
-                    )
+                    (bottomRightFadeStart - y) /
+                    MAX(1.0, sideTailLength)
                 );
 
-            CGFloat tlT =
-                topLeftTailProgress;
-
-            CGFloat brT =
-                bottomRightTailProgress;
+            /* C2-continuous smootherstep: 6t^5 - 15t^4 + 10t^3. */
+            CGFloat tlT = topLeftTailProgress;
+            CGFloat brT = bottomRightTailProgress;
 
             CGFloat topLeftTailSmooth =
                 tlT * tlT * tlT *
-                (
-                    tlT *
-                    (
-                        tlT * 6.0 -
-                        15.0
-                    ) +
-                    10.0
-                );
+                (tlT * (tlT * 6.0 - 15.0) + 10.0);
 
             CGFloat bottomRightTailSmooth =
                 brT * brT * brT *
-                (
-                    brT *
-                    (
-                        brT * 6.0 -
-                        15.0
-                    ) +
-                    10.0
-                );
+                (brT * (brT * 6.0 - 15.0) + 10.0);
 
             CGFloat leftTailEnvelope =
                 (y <= topLeftFadeStart)
                     ? 1.0
-                    : (
-                        (y <=
-                            topLeftFadeStart +
-                            sideTailLength)
-                            ? (
-                                1.0 -
-                                topLeftTailSmooth
-                            )
-                            : 0.0
-                    );
+                    : ((y <= topLeftFadeStart + sideTailLength)
+                        ? (1.0 - topLeftTailSmooth)
+                        : 0.0);
 
             CGFloat rightTailEnvelope =
                 (y >= bottomRightFadeStart)
                     ? 1.0
-                    : (
-                        (y >=
-                            bottomRightFadeStart -
-                            sideTailLength)
-                            ? (
-                                1.0 -
-                                bottomRightTailSmooth
-                            )
-                            : 0.0
-                    );
+                    : ((y >= bottomRightFadeStart - sideTailLength)
+                        ? (1.0 - bottomRightTailSmooth)
+                        : 0.0);
 
+            /*
+             * At TL the top and left envelopes overlap at exactly 1.0; at BR
+             * the bottom and right envelopes do the same. MAX cannot create a
+             * valley at an internal join. Only the true side tail may fade.
+             */
             CGFloat primaryEnvelope =
-                MAX(
-                    topEnvelope,
-                    leftTailEnvelope
-                );
+                MAX(topEnvelope, leftTailEnvelope);
 
             CGFloat secondaryEnvelope =
-                MAX(
-                    bottomEnvelope,
-                    rightTailEnvelope
-                );
+                MAX(bottomEnvelope, rightTailEnvelope);
 
+            /*
+             * Free endpoints remain soft: primary rolls away through the TR
+             * arc, secondary through the BL arc. Use a C2 gate here too so the
+             * opposite corners never introduce a hard shoulder.
+             */
             CGFloat rightArcProgress =
                 B3MClamp01(
-                    (
-                        x -
-                        (
-                            width -
-                            endpointRadius
-                        )
-                    ) /
+                    (x - (width - endpointRadius)) /
                     endpointRadius
                 );
 
             CGFloat leftArcProgress =
                 B3MClamp01(
-                    (
-                        endpointRadius -
-                        x
-                    ) /
+                    (endpointRadius - x) /
                     endpointRadius
                 );
 
-            CGFloat rr =
-                rightArcProgress;
-
-            CGFloat lr =
-                leftArcProgress;
+            CGFloat rr = rightArcProgress;
+            CGFloat lr = leftArcProgress;
 
             CGFloat rightArcSmooth =
                 rr * rr * rr *
-                (
-                    rr *
-                    (
-                        rr * 6.0 -
-                        15.0
-                    ) +
-                    10.0
-                );
+                (rr * (rr * 6.0 - 15.0) + 10.0);
 
             CGFloat leftArcSmooth =
                 lr * lr * lr *
-                (
-                    lr *
-                    (
-                        lr * 6.0 -
-                        15.0
-                    ) +
-                    10.0
-                );
+                (lr * (lr * 6.0 - 15.0) + 10.0);
 
             CGFloat primaryEndpointGate =
-                1.0 -
-                0.88 *
-                rightArcSmooth;
+                1.0 - 0.88 * rightArcSmooth;
 
             CGFloat secondaryEndpointGate =
-                1.0 -
-                0.88 *
-                leftArcSmooth;
+                1.0 - 0.88 * leftArcSmooth;
 
             CGFloat primaryRailMask =
                 B3MClamp01(
@@ -963,273 +899,215 @@ static UIImage *B3MCreateMenuOpticalLightingImage(CGSize size,
             CGFloat sideMiddleMask =
                 verticalEdge *
                 pow(
-                    MAX(
-                        0.0,
-                        1.0 -
-                        coveredByRails
-                    ),
+                    MAX(0.0, 1.0 - coveredByRails),
                     1.60
                 );
 
-            CGFloat perimeterFloor =
-                darkAppearance
-                    ? 0.0048
-                    : 0.0035;
+            CGFloat perimeterFloor = darkAppearance
+                ? 0.0048
+                : 0.0035;
 
-            CGFloat primaryFilamentGain =
-                darkAppearance
-                    ? (
-                        0.036 +
-                        0.300 *
-                        edgeDrive
-                    )
-                    : (
-                        0.046 +
-                        0.360 *
-                        edgeDrive
-                    );
+            /*
+             * Liquid Glass keeps the existing high-energy rail. Clear gets a
+             * separate broad/soft rail so it does not read as "Liquid Glass
+             * with less blur".  Dark appearance needs more white definition;
+             * light appearance deliberately backs it off.
+             */
+            CGFloat primaryFilamentGain;
+            CGFloat primaryCoreGain;
+            CGFloat primaryShoulderGain;
+            CGFloat secondaryFilamentGain;
+            CGFloat secondaryCoreGain;
+            CGFloat secondaryShoulderGain;
+            CGFloat sideMiddleGain;
+            CGFloat topRightTransitionGain;
+            CGFloat bottomLeftTransitionGain;
 
-            CGFloat primaryCoreGain =
-                darkAppearance
-                    ? (
-                        0.014 +
-                        0.090 *
-                        edgeDrive
-                    )
-                    : (
-                        0.016 +
-                        0.100 *
-                        edgeDrive
-                    );
+            if (clearStyle) {
+                primaryFilamentGain = darkAppearance
+                    ? (0.010 + 0.075 * edgeDrive)
+                    : (0.008 + 0.055 * edgeDrive);
 
-            CGFloat primaryShoulderGain =
-                darkAppearance
-                    ? (
-                        0.008 +
-                        0.035 *
-                        edgeDrive
-                    )
-                    : (
-                        0.010 +
-                        0.040 *
-                        edgeDrive
-                    );
+                primaryCoreGain = darkAppearance
+                    ? (0.014 + 0.055 * edgeDrive)
+                    : (0.010 + 0.040 * edgeDrive);
 
-            CGFloat secondaryFilamentGain =
-                darkAppearance
-                    ? (
-                        0.024 +
-                        0.220 *
-                        edgeDrive
-                    )
-                    : (
-                        0.016 +
-                        0.150 *
-                        edgeDrive
-                    );
+                primaryShoulderGain = darkAppearance
+                    ? (0.015 + 0.045 * edgeDrive)
+                    : (0.011 + 0.034 * edgeDrive);
 
-            CGFloat secondaryCoreGain =
-                darkAppearance
-                    ? (
-                        0.009 +
-                        0.064 *
-                        edgeDrive
-                    )
-                    : (
-                        0.006 +
-                        0.045 *
-                        edgeDrive
-                    );
+                secondaryFilamentGain = darkAppearance
+                    ? (0.007 + 0.052 * edgeDrive)
+                    : (0.005 + 0.038 * edgeDrive);
 
-            CGFloat secondaryShoulderGain =
-                darkAppearance
-                    ? (
-                        0.005 +
-                        0.023 *
-                        edgeDrive
-                    )
-                    : (
-                        0.004 +
-                        0.016 *
-                        edgeDrive
-                    );
+                secondaryCoreGain = darkAppearance
+                    ? (0.009 + 0.038 * edgeDrive)
+                    : (0.006 + 0.028 * edgeDrive);
 
-            CGFloat sideMiddleGain =
-                darkAppearance
-                    ? (
-                        0.0018 +
-                        0.010 *
-                        edgeDrive
-                    )
-                    : (
-                        0.0008 +
-                        0.0035 *
-                        edgeDrive
-                    );
+                secondaryShoulderGain = darkAppearance
+                    ? (0.009 + 0.032 * edgeDrive)
+                    : (0.006 + 0.023 * edgeDrive);
 
-            CGFloat topRightTransitionGain =
-                darkAppearance
-                    ? (
-                        0.0025 +
-                        0.010 *
-                        edgeDrive
-                    )
-                    : (
-                        0.0010 +
-                        0.004 *
-                        edgeDrive
-                    );
+                sideMiddleGain = darkAppearance
+                    ? (0.0010 + 0.0040 * edgeDrive)
+                    : (0.0008 + 0.0030 * edgeDrive);
 
-            CGFloat bottomLeftTransitionGain =
-                darkAppearance
-                    ? (
-                        0.008 +
-                        0.045 *
-                        edgeDrive
-                    )
-                    : (
-                        0.018 +
-                        0.095 *
-                        edgeDrive
-                    );
+                topRightTransitionGain = darkAppearance
+                    ? (0.0013 + 0.0050 * edgeDrive)
+                    : (0.0010 + 0.0038 * edgeDrive);
+
+                bottomLeftTransitionGain = topRightTransitionGain;
+            } else {
+                primaryFilamentGain = darkAppearance
+                    ? (0.036 + 0.300 * edgeDrive)
+                    : (0.046 + 0.360 * edgeDrive);
+
+                primaryCoreGain = darkAppearance
+                    ? (0.014 + 0.090 * edgeDrive)
+                    : (0.016 + 0.100 * edgeDrive);
+
+                primaryShoulderGain = darkAppearance
+                    ? (0.008 + 0.035 * edgeDrive)
+                    : (0.010 + 0.040 * edgeDrive);
+
+                secondaryFilamentGain = darkAppearance
+                    ? (0.024 + 0.220 * edgeDrive)
+                    : (0.016 + 0.150 * edgeDrive);
+
+                secondaryCoreGain = darkAppearance
+                    ? (0.009 + 0.064 * edgeDrive)
+                    : (0.006 + 0.045 * edgeDrive);
+
+                secondaryShoulderGain = darkAppearance
+                    ? (0.005 + 0.023 * edgeDrive)
+                    : (0.004 + 0.016 * edgeDrive);
+
+                sideMiddleGain = darkAppearance
+                    ? (0.0018 + 0.010 * edgeDrive)
+                    : (0.0008 + 0.0035 * edgeDrive);
+
+                /*
+                 * Apple-reference opened Liquid Glass: the top/upper-left
+                 * filament stays dominant, while the lower-left corner gets
+                 * a compact specular glint instead of a uniformly bright
+                 * perimeter.  The upper-right remains only a transition cue.
+                 */
+                topRightTransitionGain = darkAppearance
+                    ? (0.0025 + 0.010 * edgeDrive)
+                    : (0.0010 + 0.004 * edgeDrive);
+
+                bottomLeftTransitionGain = darkAppearance
+                    ? (0.008 + 0.045 * edgeDrive)
+                    : (0.018 + 0.095 * edgeDrive);
+            }
+
+            /*
+             * Only a tiny directional micro-variation survives. This keeps
+             * the TL arc and top segment visually equal instead of making the
+             * 45-degree corner peak brighter.
+             */
+            /*
+             * The opened panel rail is intentionally energy-flat through an
+             * internal tangent.  Direction still shapes the non-owned corner
+             * transitions, but it must not create a 1-4% dip exactly where a
+             * curved rail becomes a straight one.
+             */
+            CGFloat primaryDirectionalMicro = 1.0;
+            CGFloat secondaryDirectionalMicro = 1.0;
 
             CGFloat white =
-                filament *
-                    perimeterFloor +
+                filament * perimeterFloor +
 
-                shoulder *
-                    primaryRailMask *
+                shoulder * primaryRailMask *
                     primaryShoulderGain +
-
-                core *
-                    primaryRailMask *
+                core * primaryRailMask *
                     primaryCoreGain +
+                filament * primaryRailMask *
+                    primaryFilamentGain *
+                    primaryDirectionalMicro +
 
-                filament *
-                    primaryRailMask *
-                    primaryFilamentGain +
-
-                shoulder *
-                    secondaryRailMask *
+                shoulder * secondaryRailMask *
                     secondaryShoulderGain +
-
-                core *
-                    secondaryRailMask *
+                core * secondaryRailMask *
                     secondaryCoreGain +
+                filament * secondaryRailMask *
+                    secondaryFilamentGain *
+                    secondaryDirectionalMicro +
 
-                filament *
-                    secondaryRailMask *
-                    secondaryFilamentGain +
-
-                filament *
-                    sideMiddleMask *
+                filament * sideMiddleMask *
                     sideMiddleGain +
 
-                filament *
-                    topRightTransition *
+                filament * topRightTransition *
                     topRightTransitionGain +
 
-                filament *
-                    bottomLeftTransition *
+                filament * bottomLeftTransition *
                     bottomLeftTransitionGain +
 
-                core *
-                    bottomLeftTransition *
-                    bottomLeftTransitionGain *
-                    0.36 +
+                /* A small soft bloom under the lower-left Liquid glint. */
+                (clearStyle ? 0.0 :
+                    (core * bottomLeftTransition *
+                        bottomLeftTransitionGain * 0.36 +
+                     shoulder * bottomLeftTransition *
+                        bottomLeftTransitionGain * 0.14)) +
 
-                shoulder *
-                    bottomLeftTransition *
-                    bottomLeftTransitionGain *
-                    0.14 +
-
+                /*
+                 * Far-side white reflection is confined to the secondary
+                 * bottom/lower-right rail, not the straight right wall.
+                 */
                 secondary *
                     secondaryRimGain *
                     secondaryRailMask *
-                    (
-                        0.32 +
-                        0.18 *
-                        edgeDrive
-                    );
+                    (0.32 + 0.18 * edgeDrive);
 
+            /*
+             * Far-side thickness starts inside the edge.  It never occupies
+             * the same pixels as the secondary white filament.
+             */
             CGFloat shadowOffset =
-                (
-                    insideDepth -
-                    darkShoulderCenter
-                ) /
-                MAX(
-                    0.001,
-                    darkShoulderWidth
-                );
+                (insideDepth - darkShoulderCenter) /
+                MAX(0.001, darkShoulderWidth);
 
             CGFloat darkStructureMask =
-                0.78 *
-                    secondaryRailMask +
-                0.18 *
-                    sideMiddleMask +
-                0.04 *
-                    (
-                        topRightTransition +
-                        bottomLeftTransition
-                    );
-
-            CGFloat dark =
-                exp(
-                    -(
-                        shadowOffset *
-                        shadowOffset *
-                        1.10
-                    )
-                ) *
-                darkShoulderGain *
-                (
-                    0.92 +
-                    0.08 *
-                    pow(
-                        opposite,
-                        1.15
-                    )
-                ) *
-                darkStructureMask;
-
-            CGFloat edgePeak =
-                darkAppearance
-                    ? (
-                        0.215 +
-                        0.275 *
-                        edgeDrive
-                    )
-                    : (
-                        0.220 +
-                        0.320 *
-                        edgeDrive
-                    );
-
-            CGFloat signedLight =
-                MIN(
-                    edgePeak,
-                    MAX(
-                        -0.045,
-                        white - dark
-                    )
+                0.78 * secondaryRailMask +
+                0.18 * sideMiddleMask +
+                0.04 * (
+                    topRightTransition +
+                    bottomLeftTransition
                 );
 
+            CGFloat dark =
+                exp(-(shadowOffset * shadowOffset * 1.10)) *
+                darkShoulderGain *
+                (0.92 + 0.08 * pow(opposite, 1.15)) *
+                darkStructureMask;
+
+            CGFloat edgePeak;
+            if (clearStyle) {
+                edgePeak = darkAppearance
+                    ? (0.130 + 0.140 * edgeDrive)
+                    : (0.100 + 0.100 * edgeDrive);
+            } else {
+                edgePeak = darkAppearance
+                    ? (0.215 + 0.275 * edgeDrive)
+                    : (0.220 + 0.320 * edgeDrive);
+            }
+
+            CGFloat signedLight =
+                MIN(edgePeak, MAX(-0.045, white - dark));
+
             CGFloat alpha =
-                fabs(signedLight) *
-                edgeCoverage;
+                fabs(signedLight) * edgeCoverage;
 
             if (alpha < 0.001) {
                 continue;
             }
 
             size_t index =
-                py * bytesPerRow +
-                px * 4;
+                py * bytesPerRow + px * 4;
 
             unsigned char a =
                 (unsigned char)lround(
-                    B3MClamp01(alpha) *
-                    255.0
+                    B3MClamp01(alpha) * 255.0
                 );
 
             if (signedLight >= 0.0) {
@@ -1263,14 +1141,10 @@ static UIImage *B3MCreateMenuOpticalLightingImage(CGSize size,
     if (image) {
         [cache setObject:image
                   forKey:cacheKey
-                    cost:
-                        pixelWidth *
-                        pixelHeight *
-                        4];
+                    cost:pixelWidth * pixelHeight * 4];
     }
 
     CGImageRelease(cgImage);
-
     return image;
 }
 
@@ -1520,19 +1394,43 @@ static UIColor *B3MGlassTextColorForView(UIView *view)
 {
     UIColor *base = B3MResolvedBaseIconColor();
 
-    CGFloat h = 0.58, s = 0.42, v = 0.72, alpha = 1.0;
-    [base getHue:&h saturation:&s brightness:&v alpha:&alpha];
+    CGFloat h = 0.0;
+    CGFloat s = 0.0;
+    CGFloat v = 0.0;
+    CGFloat alpha = 1.0;
 
-    if (B3MUsesDarkAppearance(view)) {
-        /*
-         * Keep action labels neutral. Colour from the sampled backdrop should
-         * read through the glass body, not through the glyphs themselves.
-         */
-        return [UIColor colorWithWhite:0.985 alpha:0.98];
+    if (![base getHue:&h saturation:&s brightness:&v alpha:&alpha] ||
+        s < 0.08) {
+        return B3MUsesDarkAppearance(view)
+            ? [UIColor colorWithWhite:0.985 alpha:0.98]
+            : [UIColor colorWithWhite:0.075 alpha:0.96];
     }
 
-    // Stable high-contrast foreground for the brighter Light glass profile.
-    return [UIColor colorWithWhite:0.075 alpha:0.96];
+    /*
+     * Adaptive Text:
+     * retain a controlled hint of the active app's hue while pinning
+     * luminance to a high-contrast Light/Dark foreground.
+     *
+     * This restores the adaptive behaviour without the fluorescent labels
+     * produced by the older high-saturation implementation.
+     */
+    if (B3MUsesDarkAppearance(view)) {
+        CGFloat adaptiveSaturation =
+            MIN(0.16, MAX(0.06, s * 0.18));
+
+        return [UIColor colorWithHue:h
+                         saturation:adaptiveSaturation
+                         brightness:0.99
+                              alpha:0.98];
+    }
+
+    CGFloat adaptiveSaturation =
+        MIN(0.32, MAX(0.12, s * 0.34));
+
+    return [UIColor colorWithHue:h
+                     saturation:adaptiveSaturation
+                     brightness:0.20
+                          alpha:0.96];
 }
 
 static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
@@ -1575,6 +1473,7 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
 @property (nonatomic, strong) UIView *b3mTintView;
 @property (nonatomic, strong) UIVisualEffectView *b3mFallbackBlurView;
 @property (nonatomic, strong) CALayer *b3mOpticalLayer;
+@property (nonatomic, assign) NSInteger b3mStyle;
 @property (nonatomic, assign) CGFloat b3mStrength;
 @property (nonatomic, assign) CGFloat b3mPreferredRadius;
 @property (nonatomic, assign) CGFloat b3mBackdropOverscan;
@@ -1582,82 +1481,372 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
 @property (nonatomic, assign) CGFloat b3mLightingRadius;
 @property (nonatomic, assign) BOOL b3mLastDarkAppearance;
 @property (nonatomic, assign) BOOL b3mHasAppearance;
-- (void)b3mRefreshMaterial;
-@end
-
-@implementation B3MMenuGlassView
-
-- (instancetype)initWithFrame:(CGRect)frame
+- (void)b3mRefreshMaterial
 {
-    self = [super initWithFrame:frame];
+    BOOL darkAppearance =
+        B3MUsesDarkAppearance(self);
 
-    if (self) {
+    self.b3mLastDarkAppearance =
+        darkAppearance;
+
+    self.b3mHasAppearance =
+        YES;
+
+    self.b3mStyle =
+        (self.b3mStyle == 0)
+            ? 0
+            : 1;
+
+    self.b3mStrength =
+        B3MClamp01(
+            self.b3mStrength
+        );
+
+    BOOL clearStyle =
+        (self.b3mStyle == 0);
+
+    CGFloat materialResponse =
+        B3MMaterialResponse(
+            self.b3mStrength
+        );
+
+    CGFloat tintResponse =
+        B3MTintResponse(
+            self.b3mStrength
+        );
+
+    CGFloat clearBlurResponse =
+        B3MClearOpenedBlurResponse(
+            self.b3mStrength
+        );
+
+    CGFloat clearStructure =
+        B3MClearStructureResponse(
+            self.b3mStrength
+        );
+
+    BOOL materialRequested =
+        clearStyle ||
+        (self.b3mStrength > 0.001);
+
+    CALayer *materialLayer =
+        self.b3mBackdropSampleView.layer;
+
+    BOOL isBackdropLayer =
+        [NSStringFromClass(materialLayer.class)
+            containsString:@"Backdrop"];
+
+    if (materialRequested &&
+        isBackdropLayer) {
+
+        CGFloat blurRadius;
+        CGFloat saturation;
+        CGFloat brightness;
+        CGFloat sampleAlpha;
+
+        if (clearStyle) {
+            /*
+             * GlassFolders-Test3 opened Clear:
+             * transparent wallpaper-owned body, strong local-blur authority,
+             * no chromatic overlay.
+             */
+            blurRadius =
+                darkAppearance
+                    ? (40.0 * clearBlurResponse)
+                    : (28.0 * clearBlurResponse);
+
+            saturation =
+                darkAppearance
+                    ? (1.080 + 0.065 * clearStructure)
+                    : (1.120 + 0.120 * clearStructure);
+
+            brightness =
+                darkAppearance
+                    ? (0.048 + 0.006 * clearStructure)
+                    : (0.075 + 0.035 * clearStructure);
+
+            sampleAlpha =
+                darkAppearance
+                    ? (0.992 + 0.006 * clearStructure)
+                    : (0.995 + 0.005 * clearStructure);
+        } else {
+            /*
+             * GlassFolders-Test3 opened Liquid Glass.
+             */
+            blurRadius =
+                darkAppearance
+                    ? (4.6 + 4.8 * materialResponse)
+                    : (2.6 + 2.8 * materialResponse);
+
+            saturation =
+                darkAppearance
+                    ? (1.070 + 0.120 * materialResponse)
+                    : (1.110 + 0.220 * materialResponse);
+
+            brightness =
+                darkAppearance
+                    ? (0.015 + 0.025 * materialResponse)
+                    : (0.026 + 0.030 * materialResponse);
+
+            sampleAlpha =
+                darkAppearance
+                    ? (0.90 + 0.08 * materialResponse)
+                    : (0.975 + 0.025 * materialResponse);
+        }
+
+        self.b3mBackdropSampleView.alpha =
+            B3MClamp01(sampleAlpha);
+
+        self.b3mBackdropOverscan =
+            MAX(
+                30.0,
+                blurRadius * 2.75 + 4.0
+            );
+
+        id saturate =
+            B3MCreateCAFilter(
+                @"colorSaturate"
+            );
+
+        id brighten =
+            B3MCreateCAFilter(
+                @"colorBrightness"
+            );
+
+        id blur =
+            B3MCreateCAFilter(
+                @"gaussianBlur"
+            );
+
+        NSMutableArray *filters =
+            [NSMutableArray array];
+
+        if (saturate) {
+            [saturate
+                setValue:@(saturation)
+                  forKey:@"inputAmount"];
+
+            [filters
+                addObject:saturate];
+        }
+
+        if (brighten &&
+            fabs(brightness) > 0.0001) {
+
+            [brighten
+                setValue:@(brightness)
+                  forKey:@"inputAmount"];
+
+            [filters
+                addObject:brighten];
+        }
+
+        if (blur &&
+            blurRadius > 0.001) {
+
+            [blur
+                setValue:@(blurRadius)
+                  forKey:@"inputRadius"];
+
+            [blur
+                setValue:@YES
+                  forKey:@"inputNormalizeEdges"];
+
+            [filters
+                addObject:blur];
+        }
+
+        [materialLayer
+            setValue:filters
+              forKey:@"filters"];
+
+        [materialLayer
+            setValue:@1.0
+              forKey:@"scale"];
+
+        self.b3mBackdropSampleView.hidden =
+            NO;
+
+        if (self.b3mFallbackBlurView) {
+            [self.b3mFallbackBlurView
+                removeFromSuperview];
+
+            self.b3mFallbackBlurView =
+                nil;
+        }
+    } else if (materialRequested) {
+        self.b3mBackdropSampleView.hidden =
+            YES;
+
+        if (!self.b3mFallbackBlurView) {
+            UIBlurEffectStyle effectStyle =
+                clearStyle
+                    ? UIBlurEffectStyleSystemUltraThinMaterial
+                    : UIBlurEffectStyleSystemThinMaterial;
+
+            UIBlurEffect *effect =
+                [UIBlurEffect
+                    effectWithStyle:effectStyle];
+
+            self.b3mFallbackBlurView =
+                [[UIVisualEffectView alloc]
+                    initWithEffect:effect];
+
+            self.b3mFallbackBlurView.userInteractionEnabled =
+                NO;
+
+            [self
+                insertSubview:self.b3mFallbackBlurView
+                 aboveSubview:self.b3mBackdropSampleView];
+        }
+
+        if (clearStyle) {
+            self.b3mFallbackBlurView.alpha =
+                darkAppearance
+                    ? (0.20 + 0.10 * clearStructure)
+                    : (0.12 + 0.06 * clearStructure);
+        } else {
+            self.b3mFallbackBlurView.alpha =
+                darkAppearance
+                    ? MIN(
+                        0.48,
+                        0.20 +
+                        0.30 *
+                        materialResponse
+                    )
+                    : MIN(
+                        0.28,
+                        0.10 +
+                        0.18 *
+                        materialResponse
+                    );
+        }
+    } else {
         /*
-         * Keep the accepted 72% menu strength. GlassFolders' response curves
-         * and optical geometry are now applied at this strength.
+         * Liquid Glass 0%: no local material. Clear intentionally keeps its
+         * baseline even at 0%, matching GlassFolders' split-slider contract.
          */
-        _b3mStrength = 0.72;
-        _b3mPreferredRadius = 0.0;
-        _b3mBackdropOverscan = 30.0;
-        _b3mLightingSize = CGSizeZero;
-        _b3mLightingRadius = -1.0;
+        self.b3mBackdropSampleView.hidden =
+            YES;
 
-        self.backgroundColor = UIColor.clearColor;
-        self.userInteractionEnabled = NO;
-        self.clipsToBounds = YES;
-        self.layer.masksToBounds = YES;
-        self.layer.allowsEdgeAntialiasing = YES;
+        [materialLayer
+            setValue:@[]
+              forKey:@"filters"];
 
-        /*
-         * GlassFolders-Test3 samples the backdrop in a dedicated overscanned
-         * CABackdropLayer child. This avoids Gaussian corner seams that occur
-         * when the sample bounds end exactly at the rounded mask.
-         */
-        _b3mBackdropSampleView =
-            [[B3MMenuBackdropSampleView alloc]
-                initWithFrame:CGRectZero];
+        if (self.b3mFallbackBlurView) {
+            [self.b3mFallbackBlurView
+                removeFromSuperview];
 
-        _b3mBackdropSampleView.userInteractionEnabled = NO;
-        _b3mBackdropSampleView.backgroundColor = UIColor.clearColor;
-        _b3mBackdropSampleView.clipsToBounds = NO;
-        _b3mBackdropSampleView.layer.masksToBounds = NO;
-
-        [self addSubview:_b3mBackdropSampleView];
-
-        _b3mTintView =
-            [[UIView alloc]
-                initWithFrame:CGRectZero];
-
-        _b3mTintView.userInteractionEnabled = NO;
-        _b3mTintView.backgroundColor = UIColor.clearColor;
-
-        [self addSubview:_b3mTintView];
-
-        /*
-         * True GlassFolders optical layer: a cached SDF-generated lighting
-         * texture, not a gradient or a simple CALayer border.
-         */
-        _b3mOpticalLayer =
-            [CALayer layer];
-
-        _b3mOpticalLayer.contentsGravity =
-            kCAGravityResize;
-
-        _b3mOpticalLayer.magnificationFilter =
-            kCAFilterLinear;
-
-        _b3mOpticalLayer.minificationFilter =
-            kCAFilterLinear;
-
-        _b3mOpticalLayer.opaque = NO;
-        _b3mOpticalLayer.zPosition = 20.0;
-
-        [self.layer addSublayer:_b3mOpticalLayer];
-
-        [self b3mRefreshMaterial];
+            self.b3mFallbackBlurView =
+                nil;
+        }
     }
 
-    return self;
+    self.b3mTintView.backgroundColor =
+        UIColor.whiteColor;
+
+    if (clearStyle) {
+        CGFloat neutralLift =
+            darkAppearance
+                ? (0.050 + 0.004 * clearStructure)
+                : (0.022 + 0.006 * clearStructure);
+
+        self.b3mTintView.alpha =
+            MIN(
+                darkAppearance
+                    ? 0.054
+                    : 0.028,
+                neutralLift
+            );
+    } else if (self.b3mStrength > 0.001) {
+        CGFloat neutralLift =
+            darkAppearance
+                ? (
+                    0.030 +
+                    0.050 *
+                    tintResponse
+                ) * self.b3mStrength
+                : (
+                    0.002 +
+                    0.006 *
+                    tintResponse
+                ) * self.b3mStrength;
+
+        self.b3mTintView.alpha =
+            MIN(
+                darkAppearance
+                    ? 0.055
+                    : 0.008,
+                neutralLift
+            );
+    } else {
+        self.b3mTintView.alpha =
+            0.0;
+    }
+
+    /*
+     * Clear and Liquid use the same SDF topology but different GlassFolders
+     * optical recipes. The renderer selects the recipe from b3mStyle.
+     */
+    if (clearStyle) {
+        self.b3mOpticalLayer.opacity =
+            darkAppearance
+                ? (0.72 + 0.14 * clearStructure)
+                : (0.70 + 0.20 * clearStructure);
+    } else {
+        self.b3mOpticalLayer.opacity =
+            (self.b3mStrength > 0.001)
+                ? 1.0
+                : 0.0;
+    }
+
+    CGFloat continuityEdge =
+        B3MEdgeResponse(
+            self.b3mStrength
+        );
+
+    CGFloat continuityAlpha;
+
+    if (clearStyle) {
+        continuityAlpha =
+            darkAppearance
+                ? (0.030 + 0.022 * clearStructure)
+                : (0.032 + 0.026 * clearStructure);
+
+        /*
+         * Menu-sized continuity floor: intentionally thinner than the large
+         * opened-folder 0.45pt floor.
+         */
+        self.layer.borderWidth =
+            0.28;
+    } else {
+        continuityAlpha =
+            darkAppearance
+                ? (0.025 + 0.040 * continuityEdge)
+                : (0.006 + 0.010 * continuityEdge);
+
+        self.layer.borderWidth =
+            (self.b3mStrength > 0.001)
+                ? (
+                    darkAppearance
+                        ? 0.24
+                        : 0.20
+                )
+                : 0.0;
+    }
+
+    self.layer.borderColor =
+        [UIColor
+            colorWithWhite:1.0
+                      alpha:
+                        B3MClamp01(
+                            continuityAlpha
+                        )].CGColor;
+
+    self.b3mOpticalLayer.contents =
+        nil;
+
+    [self setNeedsLayout];
 }
 
 - (void)b3mRefreshMaterial
@@ -2058,6 +2247,7 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
                 currentSize,
                 radius,
                 self.b3mStrength,
+                self.b3mStyle,
                 darkAppearance
             );
 
@@ -2174,8 +2364,18 @@ static void B3MApplyGlassBackground(UIView *backgroundView)
     }
 
     material.frame = backgroundView.bounds;
+
+    material.b3mStyle =
+        (gB3MGlassStyle == 0)
+            ? 0
+            : 1;
+
+    material.b3mStrength =
+        B3MActiveGlassStrength();
+
     CGFloat radius = backgroundView.layer.cornerRadius;
     if (radius <= 0.0) radius = 14.0;
+
     material.b3mPreferredRadius = radius;
     [material b3mRefreshMaterial];
     [backgroundView bringSubviewToFront:material];
@@ -2612,6 +2812,14 @@ static void B3MApplyGlassToContextMenuRoot(UIView *root)
 
     glass.frame = root.bounds;
 
+    glass.b3mStyle =
+        (gB3MGlassStyle == 0)
+            ? 0
+            : 1;
+
+    glass.b3mStrength =
+        B3MActiveGlassStrength();
+
     CGFloat radius = root.layer.cornerRadius;
     if (radius <= 0.0) radius = 14.0;
 
@@ -2917,10 +3125,15 @@ static void B3MDiagnosticDumpContextMenu(UIView *root, NSString *phase)
           root.window,
           NSStringFromClass(root.window.class));
 
-    NSLog(@"[B3M-DIAG] SETTINGS GlassMenuTint=%d GlassTextTint=%d ReduceBlur=%d "
+    NSLog(@"[B3M-DIAG] SETTINGS GlassMenuTint=%d GlassTextTint=%d GlassStyle=%ld "
+          @"ClearStrength=%.3f LiquidStrength=%.3f ActiveStrength=%.3f ReduceBlur=%d "
           @"HideSeparators=%d HideShareApp=%d HideRemoveApp=%d HideSectionGap=%d BlurFactor=%.3f",
           gB3MGlassMenuTint,
           gB3MGlassTextTint,
+          (long)gB3MGlassStyle,
+          gB3MClearStrength,
+          gB3MLiquidGlassStrength,
+          B3MActiveGlassStrength(),
           gB3MReduceBlur,
           gB3MHideSeparators,
           gB3MHideShareApp,
