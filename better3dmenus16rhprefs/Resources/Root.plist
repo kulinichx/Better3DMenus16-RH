@@ -12,8 +12,9 @@
 			<key>label</key>
 			<string>Context Menu</string>
 			<key>footerText</key>
-			<string>iOS 16 / RootHide compatibility build. This safety build only changes context-menu visuals and Share App filtering.</string>
+			<string>iOS 16 / RootHide compatibility build. Visual context-menu tweaks only; no Home Screen long-press timing hooks are used.</string>
 		</dict>
+
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
@@ -28,6 +29,7 @@
 			<key>PostNotification</key>
 			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 		</dict>
+
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
@@ -42,6 +44,7 @@
 			<key>PostNotification</key>
 			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 		</dict>
+
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
@@ -56,13 +59,29 @@
 			<key>PostNotification</key>
 			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
 		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>Hide Section Gap (Experimental)</string>
+			<key>defaults</key>
+			<string>com.kulinichx.better3dmenus16rh</string>
+			<key>key</key>
+			<string>HideSectionGap</string>
+			<key>default</key>
+			<false/>
+			<key>PostNotification</key>
+			<string>com.kulinichx.better3dmenus16rh/preferences.changed</string>
+		</dict>
+
 		<dict>
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Testing</string>
 			<key>footerText</key>
-			<string>v0.1.4 safety fix removes the experimental Faster Haptic Touch hook because it could shorten the Home Screen edit-mode gesture. If SpringBoard becomes unstable, disable the last feature changed before continuing D1 stability testing.</string>
+			<string>v0.1.5 adds an experimental Hide Section Gap option. Faster Haptic Touch remains intentionally disabled until the iOS 16 Context Menu activation path is isolated safely.</string>
 		</dict>
 	</array>
 </dict>
