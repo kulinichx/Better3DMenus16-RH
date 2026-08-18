@@ -102,7 +102,7 @@
 			<key>label</key>
 			<string>Glass Effect</string>
 			<key>footerText</key>
-			<string>Clear and Liquid Glass keep separate strength values. Strength snaps in 5% steps.</string>
+			<string>Clear and Liquid Glass keep separate strength values.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -146,13 +146,11 @@
 		</dict>
 		<dict>
 			<key>cell</key>
-			<string>PSTitleValueCell</string>
+			<string>PSGroupCell</string>
 			<key>id</key>
 			<string>ActiveStrengthLabel</string>
 			<key>label</key>
 			<string>Liquid Glass Strength</string>
-			<key>get</key>
-			<string>activeStrengthDisplay:</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -172,7 +170,7 @@
 			<key>set</key>
 			<string>setActiveStrength:specifier:</string>
 			<key>cellClass</key>
-			<string>B3MSteppedSliderCell</string>
+			<string>B3MPercentSliderCell</string>
 		</dict>
 	</array>
 </dict>

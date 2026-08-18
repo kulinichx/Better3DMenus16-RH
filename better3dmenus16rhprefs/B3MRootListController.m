@@ -1,9 +1,8 @@
 #import "B3MRootListController.h"
-#import <Preferences/PSSpecifier.h>
-#import <Preferences/PSControlTableCell.h>
-#import <Preferences/PSSliderTableCell.h>
-#import <CoreFoundation/CoreFoundation.h>
 #import <UIKit/UIKit.h>
+#import <CoreFoundation/CoreFoundation.h>
+#import <Preferences/PSSpecifier.h>
+#import <Preferences/PSSliderTableCell.h>
 #import <math.h>
 
 static CFStringRef const kB3MPrefsDomain =
@@ -12,135 +11,7 @@ static CFStringRef const kB3MPrefsDomain =
 static CFStringRef const kB3MPreferencesChanged =
     CFSTR("com.kulinichx.better3dmenus16rh/preferences.changed");
 
-static const double kB3MStrengthStep = 5.0;
-
-static double B3MSnapStrength(double value)
-{
-    value = MAX(0.0, MIN(100.0, value));
-
-    double snapped =
-        round(value / kB3MStrengthStep) *
-        kB3MStrengthStep;
-
-    return MAX(0.0, MIN(100.0, snapped));
-}
-
-@interface PSListController (B3MReloadSpecifier)
-- (void)reloadSpecifier:(PSSpecifier *)specifier;
-@end
-
-@interface B3MSteppedSliderCell : PSSliderTableCell
-@end
-
-@implementation B3MSteppedSliderCell
-
-- (instancetype)initWithStyle:(UITableViewCellStyle)style
-              reuseIdentifier:(NSString *)reuseIdentifier
-                    specifier:(PSSpecifier *)specifier
-{
-    self =
-        [super initWithStyle:style
-             reuseIdentifier:reuseIdentifier
-                   specifier:specifier];
-
-    if (self) {
-        [self b3mInstallStepTarget];
-    }
-
-    return self;
-}
-
-- (void)didMoveToWindow
-{
-    [super didMoveToWindow];
-    [self b3mInstallStepTarget];
-}
-
-- (void)b3mInstallStepTarget
-{
-    UIControl *control = [self control];
-
-    if (![control isKindOfClass:UISlider.class]) {
-        return;
-    }
-
-    UISlider *slider = (UISlider *)control;
-
-    [slider removeTarget:self
-                  action:@selector(b3mSliderValueChanged:)
-        forControlEvents:UIControlEventValueChanged];
-
-    [slider addTarget:self
-               action:@selector(b3mSliderValueChanged:)
-     forControlEvents:UIControlEventValueChanged];
-}
-
-- (void)b3mSliderValueChanged:(UISlider *)slider
-{
-    float snapped =
-        (float)B3MSnapStrength(slider.value);
-
-    if (fabsf(slider.value - snapped) > 0.001f) {
-        slider.value = snapped;
-    }
-}
-
-@end
-
-@interface B3MRootListController ()
-
-@property (nonatomic, strong)
-    UISelectionFeedbackGenerator *b3mSelectionFeedback;
-
-@property (nonatomic, assign)
-    NSInteger b3mLastHapticStep;
-
-@end
-
-@implementation B3MRootListController
-
-- (void)viewDidLoad
-{
-    [super viewDidLoad];
-
-    self.b3mLastHapticStep = -1;
-
-    self.b3mSelectionFeedback =
-        [[UISelectionFeedbackGenerator alloc] init];
-
-    [self.b3mSelectionFeedback prepare];
-}
-
-- (NSArray *)specifiers
-{
-    if (!_specifiers) {
-        _specifiers =
-            [self loadSpecifiersFromPlistName:@"Root"
-                                       target:self];
-
-        [self b3mUpdateActiveStrengthLabel];
-    }
-
-    return _specifiers;
-}
-
-- (PSSpecifier *)b3mSpecifierWithIdentifier:(NSString *)identifier
-{
-    if (identifier.length == 0) return nil;
-
-    for (PSSpecifier *specifier in _specifiers) {
-        NSString *candidate =
-            [specifier propertyForKey:@"id"];
-
-        if ([candidate isEqualToString:identifier]) {
-            return specifier;
-        }
-    }
-
-    return nil;
-}
-
-- (NSInteger)b3mCurrentGlassStyle
+static NSInteger B3MCurrentGlassStyle(void)
 {
     CFPreferencesAppSynchronize(kB3MPrefsDomain);
 
@@ -170,10 +41,394 @@ static double B3MSnapStrength(double value)
     return style;
 }
 
+static CFStringRef B3MActiveStrengthKey(void)
+{
+    return B3MCurrentGlassStyle() == 0
+        ? CFSTR("ClearStrength")
+        : CFSTR("LiquidGlassStrength");
+}
+
+static double B3MActiveStrengthFallback(void)
+{
+    return B3MCurrentGlassStyle() == 0
+        ? 55.0
+        : 72.0;
+}
+
+static void B3MPostPreferencesChanged(void)
+{
+    CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        kB3MPreferencesChanged,
+        NULL,
+        NULL,
+        true
+    );
+}
+
+
+@interface B3MPercentSliderCell : PSSliderTableCell
+
+@property (nonatomic, strong)
+    UILabel *b3mPercentLabel;
+
+@property (nonatomic, weak)
+    UISlider *b3mBoundSlider;
+
+@property (nonatomic, strong)
+    UIImpactFeedbackGenerator *b3mImpactFeedback;
+
+@property (nonatomic, assign)
+    NSInteger b3mLastDetent;
+
+@property (nonatomic, assign)
+    NSInteger b3mPendingDetent;
+
+@end
+
+
+@implementation B3MPercentSliderCell
+
+- (void)b3mEnsurePercentLabel
+{
+    if (self.b3mPercentLabel) {
+        return;
+    }
+
+    UILabel *label =
+        [[UILabel alloc] initWithFrame:CGRectZero];
+
+    label.textAlignment =
+        NSTextAlignmentCenter;
+
+    label.textColor =
+        UIColor.secondaryLabelColor;
+
+    label.font =
+        [UIFont monospacedDigitSystemFontOfSize:15.0
+                                         weight:UIFontWeightSemibold];
+
+    /*
+     * Exact GlassFolders layout idea:
+     * opaque dynamic badge masks Preferences' internal track beneath it.
+     */
+    label.backgroundColor =
+        UIColor.secondarySystemGroupedBackgroundColor;
+
+    label.layer.cornerRadius = 7.0;
+    label.clipsToBounds = YES;
+    label.userInteractionEnabled = NO;
+
+    [self.contentView addSubview:label];
+
+    self.b3mPercentLabel = label;
+    self.b3mLastDetent = NSIntegerMin;
+    self.b3mPendingDetent = NSIntegerMin;
+}
+
+- (UISlider *)b3mSlider
+{
+    UIControl *control = [self control];
+
+    if ([control isKindOfClass:[UISlider class]]) {
+        return (UISlider *)control;
+    }
+
+    return nil;
+}
+
+- (NSInteger)b3mDetentForValue:(float)value
+{
+    NSInteger detent =
+        (NSInteger)lroundf(value / 5.0f) * 5;
+
+    return MAX(0, MIN(100, detent));
+}
+
+- (void)b3mPersistDetent:(NSInteger)detent
+{
+    detent = MAX(0, MIN(100, detent));
+
+    double storedValue =
+        (double)detent;
+
+    CFNumberRef number =
+        CFNumberCreate(
+            kCFAllocatorDefault,
+            kCFNumberDoubleType,
+            &storedValue
+        );
+
+    if (number) {
+        CFPreferencesSetAppValue(
+            B3MActiveStrengthKey(),
+            number,
+            kB3MPrefsDomain
+        );
+
+        CFPreferencesAppSynchronize(
+            kB3MPrefsDomain
+        );
+
+        CFRelease(number);
+    }
+
+    B3MPostPreferencesChanged();
+}
+
+- (void)b3mEnsureImpactGenerator
+{
+    if (!self.b3mImpactFeedback) {
+        /*
+         * Same feedback type as GlassFolders:
+         * crisp mechanical tick at each 5% threshold.
+         */
+        self.b3mImpactFeedback =
+            [[UIImpactFeedbackGenerator alloc]
+                initWithStyle:UIImpactFeedbackStyleRigid];
+    }
+}
+
+- (void)b3mBindSliderIfNeeded
+{
+    UISlider *slider =
+        [self b3mSlider];
+
+    if (!slider) {
+        return;
+    }
+
+    if (self.b3mBoundSlider != slider) {
+        if (self.b3mBoundSlider) {
+            [self.b3mBoundSlider
+                removeTarget:self
+                      action:NULL
+            forControlEvents:UIControlEventAllEvents];
+        }
+
+        self.b3mBoundSlider = slider;
+        slider.continuous = YES;
+
+        [slider addTarget:self
+                   action:@selector(b3mSliderTouchDown:)
+         forControlEvents:UIControlEventTouchDown];
+
+        [slider addTarget:self
+                   action:@selector(b3mSliderChanged:)
+         forControlEvents:UIControlEventValueChanged];
+
+        [slider addTarget:self
+                   action:@selector(b3mSliderTouchEnded:)
+         forControlEvents:(
+             UIControlEventTouchUpInside |
+             UIControlEventTouchUpOutside |
+             UIControlEventTouchCancel
+         )];
+
+        NSInteger initial =
+            [self b3mDetentForValue:slider.value];
+
+        self.b3mLastDetent = initial;
+        self.b3mPendingDetent = initial;
+    }
+}
+
+- (void)b3mUpdatePercentLabel
+{
+    UISlider *slider =
+        [self b3mSlider];
+
+    if (!slider) {
+        self.b3mPercentLabel.text = @"";
+        return;
+    }
+
+    NSInteger detent =
+        [self b3mDetentForValue:slider.value];
+
+    self.b3mPercentLabel.text =
+        [NSString stringWithFormat:@"%ld%%",
+                                   (long)detent];
+}
+
+- (void)b3mSliderTouchDown:(UISlider *)sender
+{
+    NSInteger detent =
+        [self b3mDetentForValue:sender.value];
+
+    self.b3mLastDetent = detent;
+    self.b3mPendingDetent = detent;
+
+    [self b3mEnsureImpactGenerator];
+    [self.b3mImpactFeedback prepare];
+}
+
+- (void)b3mSliderChanged:(UISlider *)sender
+{
+    /*
+     * Directly ported GlassFolders interaction:
+     * - thumb remains smooth under the finger
+     * - nearest 5% is displayed live
+     * - each crossed 5% threshold emits one crisp tick
+     * - exact magnetic settle happens only on release
+     */
+    NSInteger detent =
+        [self b3mDetentForValue:sender.value];
+
+    self.b3mPendingDetent = detent;
+
+    if (self.b3mLastDetent != detent) {
+        self.b3mLastDetent = detent;
+
+        [self b3mEnsureImpactGenerator];
+
+        [self.b3mImpactFeedback
+            impactOccurredWithIntensity:0.68];
+
+        [self.b3mImpactFeedback prepare];
+    }
+
+    self.b3mPercentLabel.text =
+        [NSString stringWithFormat:@"%ld%%",
+                                   (long)detent];
+}
+
+- (void)b3mSliderTouchEnded:(UISlider *)sender
+{
+    NSInteger detent =
+        self.b3mPendingDetent;
+
+    if (detent == NSIntegerMin) {
+        detent =
+            [self b3mDetentForValue:sender.value];
+    }
+
+    detent =
+        MAX(0, MIN(100, detent));
+
+    /*
+     * Same GlassFolders magnetic settle:
+     * smooth while dragging, exact 5% value on release.
+     */
+    [sender setValue:(float)detent
+            animated:YES];
+
+    [self b3mPersistDetent:detent];
+
+    self.b3mPercentLabel.text =
+        [NSString stringWithFormat:@"%ld%%",
+                                   (long)detent];
+
+    self.b3mPendingDetent = detent;
+    self.b3mLastDetent = detent;
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+
+    [self b3mEnsurePercentLabel];
+    [self b3mBindSliderIfNeeded];
+
+    UISlider *slider =
+        [self b3mSlider];
+
+    if (!slider) {
+        self.b3mPercentLabel.hidden = YES;
+        return;
+    }
+
+    self.b3mPercentLabel.hidden = NO;
+
+    CGRect bounds =
+        self.contentView.bounds;
+
+    /*
+     * GlassFolders percentage column geometry.
+     */
+    const CGFloat leftInset = 14.0;
+    const CGFloat valueWidth = 64.0;
+    const CGFloat gap = 18.0;
+    const CGFloat rightInset = 18.0;
+
+    self.b3mPercentLabel.frame =
+        CGRectMake(
+            leftInset,
+            5.0,
+            valueWidth,
+            MAX(
+                28.0,
+                CGRectGetHeight(bounds) - 10.0
+            )
+        );
+
+    CGRect sliderFrame =
+        slider.frame;
+
+    sliderFrame.origin.x =
+        leftInset +
+        valueWidth +
+        gap;
+
+    sliderFrame.size.width =
+        MAX(
+            120.0,
+            CGRectGetWidth(bounds) -
+            sliderFrame.origin.x -
+            rightInset
+        );
+
+    slider.frame =
+        sliderFrame;
+
+    [self.contentView
+        bringSubviewToFront:self.b3mPercentLabel];
+
+    [self b3mUpdatePercentLabel];
+}
+
+@end
+
+
+@implementation B3MRootListController
+
+- (NSArray *)specifiers
+{
+    if (!_specifiers) {
+        _specifiers =
+            [self loadSpecifiersFromPlistName:@"Root"
+                                       target:self];
+
+        [self b3mUpdateActiveStrengthLabel];
+    }
+
+    return _specifiers;
+}
+
+- (PSSpecifier *)b3mSpecifierWithIdentifier:(NSString *)identifier
+{
+    if (identifier.length == 0) {
+        return nil;
+    }
+
+    for (PSSpecifier *specifier in _specifiers) {
+        NSString *candidate =
+            [specifier propertyForKey:@"id"];
+
+        if ([candidate isEqualToString:identifier]) {
+            return specifier;
+        }
+    }
+
+    return nil;
+}
+
 - (NSNumber *)b3mStrengthForKey:(CFStringRef)key
                        fallback:(double)fallback
 {
-    CFPreferencesAppSynchronize(kB3MPrefsDomain);
+    CFPreferencesAppSynchronize(
+        kB3MPrefsDomain
+    );
 
     CFPropertyListRef value =
         CFPreferencesCopyAppValue(
@@ -181,16 +436,21 @@ static double B3MSnapStrength(double value)
             kB3MPrefsDomain
         );
 
-    double strength = fallback;
+    double strength =
+        fallback;
 
     if (value) {
-        if (CFGetTypeID(value) == CFNumberGetTypeID()) {
-            double number = fallback;
+        if (CFGetTypeID(value) ==
+            CFNumberGetTypeID()) {
+
+            double number =
+                fallback;
 
             if (CFNumberGetValue(
                     (CFNumberRef)value,
                     kCFNumberDoubleType,
                     &number)) {
+
                 strength = number;
             }
         }
@@ -198,30 +458,21 @@ static double B3MSnapStrength(double value)
         CFRelease(value);
     }
 
-    return @(B3MSnapStrength(strength));
+    strength =
+        MAX(0.0, MIN(100.0, strength));
+
+    return @(strength);
 }
 
 - (id)readActiveStrength:(PSSpecifier *)specifier
 {
     (void)specifier;
 
-    if ([self b3mCurrentGlassStyle] == 0) {
-        return [self b3mStrengthForKey:CFSTR("ClearStrength")
-                              fallback:55.0];
-    }
-
-    return [self b3mStrengthForKey:CFSTR("LiquidGlassStrength")
-                          fallback:72.0];
-}
-
-- (NSString *)activeStrengthDisplay:(PSSpecifier *)specifier
-{
-    (void)specifier;
-
-    double strength =
-        [[self readActiveStrength:nil] doubleValue];
-
-    return [NSString stringWithFormat:@"%.0f%%", strength];
+    return
+        [self b3mStrengthForKey:
+            B3MActiveStrengthKey()
+                        fallback:
+            B3MActiveStrengthFallback()];
 }
 
 - (void)setActiveStrength:(id)value
@@ -229,23 +480,14 @@ static double B3MSnapStrength(double value)
 {
     (void)specifier;
 
-    double rawValue =
-        [value respondsToSelector:@selector(doubleValue)]
-            ? [value doubleValue]
-            : 0.0;
-
     double strength =
-        B3MSnapStrength(rawValue);
+        [value respondsToSelector:
+            @selector(doubleValue)]
+            ? [value doubleValue]
+            : B3MActiveStrengthFallback();
 
-    NSInteger step =
-        (NSInteger)lround(
-            strength / kB3MStrengthStep
-        );
-
-    CFStringRef key =
-        ([self b3mCurrentGlassStyle] == 0)
-            ? CFSTR("ClearStrength")
-            : CFSTR("LiquidGlassStrength");
+    strength =
+        MAX(0.0, MIN(100.0, strength));
 
     CFNumberRef number =
         CFNumberCreate(
@@ -256,38 +498,19 @@ static double B3MSnapStrength(double value)
 
     if (number) {
         CFPreferencesSetAppValue(
-            key,
+            B3MActiveStrengthKey(),
             number,
+            kB3MPrefsDomain
+        );
+
+        CFPreferencesAppSynchronize(
             kB3MPrefsDomain
         );
 
         CFRelease(number);
     }
 
-    CFPreferencesAppSynchronize(kB3MPrefsDomain);
-
-    CFNotificationCenterPostNotification(
-        CFNotificationCenterGetDarwinNotifyCenter(),
-        kB3MPreferencesChanged,
-        NULL,
-        NULL,
-        true
-    );
-
-    if (step != self.b3mLastHapticStep) {
-        [self.b3mSelectionFeedback selectionChanged];
-        [self.b3mSelectionFeedback prepare];
-
-        self.b3mLastHapticStep = step;
-
-        PSSpecifier *valueSpecifier =
-            [self b3mSpecifierWithIdentifier:
-                @"ActiveStrengthLabel"];
-
-        if (valueSpecifier) {
-            [self reloadSpecifier:valueSpecifier];
-        }
-    }
+    B3MPostPreferencesChanged();
 }
 
 - (void)b3mUpdateActiveStrengthLabel
@@ -296,10 +519,12 @@ static double B3MSnapStrength(double value)
         [self b3mSpecifierWithIdentifier:
             @"ActiveStrengthLabel"];
 
-    if (!labelSpecifier) return;
+    if (!labelSpecifier) {
+        return;
+    }
 
     NSString *label =
-        ([self b3mCurrentGlassStyle] == 0)
+        B3MCurrentGlassStyle() == 0
             ? @"Clear Strength"
             : @"Liquid Glass Strength";
 
@@ -317,9 +542,12 @@ static double B3MSnapStrength(double value)
         [specifier propertyForKey:@"key"];
 
     if ([key isEqualToString:@"GlassStyle"]) {
-        self.b3mLastHapticStep = -1;
-
         [self b3mUpdateActiveStrengthLabel];
+
+        /*
+         * Recreate the single strength row so the native slider requests
+         * the newly selected style's saved value.
+         */
         [self reloadSpecifiers];
     }
 }
