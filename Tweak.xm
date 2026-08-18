@@ -1481,6 +1481,64 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
 @property (nonatomic, assign) CGFloat b3mLightingRadius;
 @property (nonatomic, assign) BOOL b3mLastDarkAppearance;
 @property (nonatomic, assign) BOOL b3mHasAppearance;
+- (void)b3mRefreshMaterial;
+@end
+
+@implementation B3MMenuGlassView
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+
+    if (self) {
+        _b3mStyle = (gB3MGlassStyle == 0) ? 0 : 1;
+        _b3mStrength = B3MActiveGlassStrength();
+        _b3mPreferredRadius = 0.0;
+        _b3mBackdropOverscan = 30.0;
+        _b3mLightingSize = CGSizeZero;
+        _b3mLightingRadius = -1.0;
+
+        self.backgroundColor = UIColor.clearColor;
+        self.userInteractionEnabled = NO;
+        self.clipsToBounds = YES;
+        self.layer.masksToBounds = YES;
+        self.layer.allowsEdgeAntialiasing = YES;
+
+        _b3mBackdropSampleView =
+            [[B3MMenuBackdropSampleView alloc]
+                initWithFrame:CGRectZero];
+
+        _b3mBackdropSampleView.userInteractionEnabled = NO;
+        _b3mBackdropSampleView.backgroundColor = UIColor.clearColor;
+        _b3mBackdropSampleView.clipsToBounds = NO;
+        _b3mBackdropSampleView.layer.masksToBounds = NO;
+
+        [self addSubview:_b3mBackdropSampleView];
+
+        _b3mTintView =
+            [[UIView alloc]
+                initWithFrame:CGRectZero];
+
+        _b3mTintView.userInteractionEnabled = NO;
+        _b3mTintView.backgroundColor = UIColor.clearColor;
+
+        [self addSubview:_b3mTintView];
+
+        _b3mOpticalLayer = [CALayer layer];
+        _b3mOpticalLayer.contentsGravity = kCAGravityResize;
+        _b3mOpticalLayer.magnificationFilter = kCAFilterLinear;
+        _b3mOpticalLayer.minificationFilter = kCAFilterLinear;
+        _b3mOpticalLayer.opaque = NO;
+        _b3mOpticalLayer.zPosition = 20.0;
+
+        [self.layer addSublayer:_b3mOpticalLayer];
+
+        [self b3mRefreshMaterial];
+    }
+
+    return self;
+}
+
 - (void)b3mRefreshMaterial
 {
     BOOL darkAppearance =
@@ -1843,292 +1901,6 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
                             continuityAlpha
                         )].CGColor;
 
-    self.b3mOpticalLayer.contents =
-        nil;
-
-    [self setNeedsLayout];
-}
-
-- (void)b3mRefreshMaterial
-{
-    BOOL darkAppearance =
-        B3MUsesDarkAppearance(self);
-
-    self.b3mLastDarkAppearance =
-        darkAppearance;
-
-    self.b3mHasAppearance =
-        YES;
-
-    CGFloat materialResponse =
-        B3MMaterialResponse(
-            self.b3mStrength
-        );
-
-    CGFloat tintResponse =
-        B3MTintResponse(
-            self.b3mStrength
-        );
-
-    CGFloat edgeResponse =
-        B3MEdgeResponse(
-            self.b3mStrength
-        );
-
-    CALayer *materialLayer =
-        self.b3mBackdropSampleView.layer;
-
-    BOOL isBackdropLayer =
-        [NSStringFromClass(materialLayer.class)
-            containsString:@"Backdrop"];
-
-    if (isBackdropLayer) {
-        /*
-         * GlassFolders-Test3 Liquid Glass body recipe.
-         *
-         * Keep wallpaper chroma/transmission as the material source in BOTH
-         * appearances. Do not compensate Light mode with a milky white body.
-         */
-        CGFloat blurRadius =
-            darkAppearance
-                ? (
-                    4.6 +
-                    4.8 *
-                    materialResponse
-                )
-                : (
-                    2.6 +
-                    2.8 *
-                    materialResponse
-                );
-
-        CGFloat saturation =
-            darkAppearance
-                ? (
-                    1.070 +
-                    0.120 *
-                    materialResponse
-                )
-                : (
-                    1.110 +
-                    0.220 *
-                    materialResponse
-                );
-
-        CGFloat brightness =
-            darkAppearance
-                ? (
-                    0.015 +
-                    0.025 *
-                    materialResponse
-                )
-                : (
-                    0.026 +
-                    0.030 *
-                    materialResponse
-                );
-
-        CGFloat sampleAlpha =
-            darkAppearance
-                ? (
-                    0.90 +
-                    0.08 *
-                    materialResponse
-                )
-                : (
-                    0.975 +
-                    0.025 *
-                    materialResponse
-                );
-
-        self.b3mBackdropSampleView.alpha =
-            B3MClamp01(sampleAlpha);
-
-        self.b3mBackdropOverscan =
-            MAX(
-                30.0,
-                blurRadius * 2.75 + 4.0
-            );
-
-        id saturate =
-            B3MCreateCAFilter(
-                @"colorSaturate"
-            );
-
-        id brighten =
-            B3MCreateCAFilter(
-                @"colorBrightness"
-            );
-
-        id blur =
-            B3MCreateCAFilter(
-                @"gaussianBlur"
-            );
-
-        NSMutableArray *filters =
-            [NSMutableArray array];
-
-        if (saturate) {
-            [saturate
-                setValue:@(saturation)
-                  forKey:@"inputAmount"];
-
-            [filters
-                addObject:saturate];
-        }
-
-        if (brighten &&
-            fabs(brightness) > 0.0001) {
-
-            [brighten
-                setValue:@(brightness)
-                  forKey:@"inputAmount"];
-
-            [filters
-                addObject:brighten];
-        }
-
-        if (blur &&
-            blurRadius > 0.001) {
-
-            [blur
-                setValue:@(blurRadius)
-                  forKey:@"inputRadius"];
-
-            [blur
-                setValue:@YES
-                  forKey:@"inputNormalizeEdges"];
-
-            /*
-             * No hard edge. The overscanned backdrop supplies real pixels
-             * beyond the final rounded clip, exactly as GlassFolders-Test3.
-             */
-            [filters
-                addObject:blur];
-        }
-
-        [materialLayer
-            setValue:filters
-              forKey:@"filters"];
-
-        [materialLayer
-            setValue:@1.0
-              forKey:@"scale"];
-
-        self.b3mBackdropSampleView.hidden =
-            NO;
-
-        if (self.b3mFallbackBlurView) {
-            [self.b3mFallbackBlurView
-                removeFromSuperview];
-
-            self.b3mFallbackBlurView =
-                nil;
-        }
-    } else {
-        self.b3mBackdropSampleView.hidden =
-            YES;
-
-        if (!self.b3mFallbackBlurView) {
-            UIBlurEffect *effect =
-                [UIBlurEffect
-                    effectWithStyle:
-                        UIBlurEffectStyleSystemThinMaterial];
-
-            self.b3mFallbackBlurView =
-                [[UIVisualEffectView alloc]
-                    initWithEffect:effect];
-
-            self.b3mFallbackBlurView.userInteractionEnabled =
-                NO;
-
-            [self
-                insertSubview:self.b3mFallbackBlurView
-                 aboveSubview:self.b3mBackdropSampleView];
-        }
-
-        self.b3mFallbackBlurView.alpha =
-            darkAppearance
-                ? MIN(
-                    0.48,
-                    0.20 +
-                    0.30 *
-                    materialResponse
-                )
-                : MIN(
-                    0.28,
-                    0.10 +
-                    0.18 *
-                    materialResponse
-                );
-    }
-
-    /*
-     * GlassFolders Liquid Glass is colorless. Hue comes from the live
-     * wallpaper/backdrop; only a very small neutral-white optical lift is used.
-     */
-    self.b3mTintView.backgroundColor =
-        UIColor.whiteColor;
-
-    CGFloat neutralLift =
-        darkAppearance
-            ? (
-                0.030 +
-                0.050 *
-                tintResponse
-            ) * self.b3mStrength
-            : (
-                0.002 +
-                0.006 *
-                tintResponse
-            ) * self.b3mStrength;
-
-    self.b3mTintView.alpha =
-        MIN(
-            darkAppearance
-                ? 0.055
-                : 0.008,
-            neutralLift
-        );
-
-    /*
-     * GlassFolders-Test3 continuity floor. The visible directional reflection
-     * now comes from b3mOpticalLayer; this border only seals tiny tangent gaps
-     * between the analytic SDF texture and kCACornerCurveContinuous clipping.
-     */
-    CGFloat continuityAlpha =
-        darkAppearance
-            ? (
-                0.025 +
-                0.040 *
-                edgeResponse
-            )
-            : (
-                0.006 +
-                0.010 *
-                edgeResponse
-            );
-
-    self.layer.borderWidth =
-        darkAppearance
-            ? 0.24
-            : 0.20;
-
-    self.layer.borderColor =
-        [UIColor
-            colorWithWhite:1.0
-                      alpha:
-                        B3MClamp01(
-                            continuityAlpha
-                        )].CGColor;
-
-    self.b3mOpticalLayer.opacity =
-        1.0;
-
-    /*
-     * Appearance changes alter the rail gains. Force regeneration even if the
-     * menu keeps the same dimensions.
-     */
     self.b3mOpticalLayer.contents =
         nil;
 
