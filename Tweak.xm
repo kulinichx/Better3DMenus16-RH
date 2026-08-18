@@ -27,6 +27,7 @@ static char kB3MBlurAlphaKey;
 static char kB3MTextCapturedKey;
 static char kB3MTextColorKey;
 static char kB3MGlassMaterialKey;
+static char kB3MRootGlassMaterialKey;
 static char kB3MStockSubviewWasHiddenKey;
 static char kB3MStockSubviewOriginalHiddenKey;
 
@@ -544,7 +545,7 @@ static BOOL B3MColorLooksDestructive(UIColor *color, UITraitCollection *traits)
          * 62% is deliberately close to GlassFolders' accepted mid-range:
          * enough authority to read as glass without whitening the menu.
          */
-        _b3mStrength = 0.62;
+        _b3mStrength = 0.72;
         _b3mPreferredRadius = 0.0;
 
         self.backgroundColor = UIColor.clearColor;
@@ -1152,6 +1153,135 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
     return changed ? result.copy : children;
 }
 
+
+static BOOL B3MViewLooksLikeStockContextMenuMaterial(UIView *view,
+                                                     UIView *root)
+{
+    if (!view || !root || [view isKindOfClass:B3MMenuGlassView.class]) {
+        return NO;
+    }
+
+    NSString *name = NSStringFromClass(view.class);
+
+    if ([name rangeOfString:@"Background" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [name rangeOfString:@"Backdrop" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [name rangeOfString:@"Material" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [name rangeOfString:@"Platter" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        return YES;
+    }
+
+    if ([view isKindOfClass:UIVisualEffectView.class]) {
+        CGRect frame = [view.superview convertRect:view.frame toView:root];
+        CGFloat rootArea = MAX(1.0, CGRectGetWidth(root.bounds) * CGRectGetHeight(root.bounds));
+        CGFloat area = MAX(0.0, CGRectGetWidth(frame) * CGRectGetHeight(frame));
+
+        // Only suppress visual-effect views that materially cover the menu body.
+        return area >= rootArea * 0.60;
+    }
+
+    return NO;
+}
+
+static void B3MSuppressStockContextMenuMaterialsRecursively(UIView *view,
+                                                            UIView *root,
+                                                            BOOL suppressed)
+{
+    if (!view || !root) return;
+
+    NSArray<UIView *> *subviews = view.subviews.copy;
+
+    for (UIView *subview in subviews) {
+        if ([subview isKindOfClass:B3MMenuGlassView.class]) {
+            continue;
+        }
+
+        if (B3MViewLooksLikeStockContextMenuMaterial(subview, root)) {
+            B3MSetStockBackgroundSubviewSuppressed(subview, suppressed);
+            // A hidden material node no longer needs descendant traversal.
+            if (suppressed) continue;
+        }
+
+        B3MSuppressStockContextMenuMaterialsRecursively(subview, root, suppressed);
+    }
+}
+
+static B3MMenuGlassView *B3MRootGlassForContextMenu(UIView *root,
+                                                    BOOL create)
+{
+    if (!root) return nil;
+
+    B3MMenuGlassView *glass =
+        objc_getAssociatedObject(root, &kB3MRootGlassMaterialKey);
+
+    if (!glass && create) {
+        glass = [[B3MMenuGlassView alloc] initWithFrame:root.bounds];
+        glass.autoresizingMask =
+            UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+        objc_setAssociatedObject(
+            root,
+            &kB3MRootGlassMaterialKey,
+            glass,
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC
+        );
+
+        // _UIContextMenuView is known to be the live menu host on the tested
+        // device because the text-color hook on this same class is observable.
+        // Keep glass at index 0 so actions/icons remain above it.
+        [root insertSubview:glass atIndex:0];
+    }
+
+    return glass;
+}
+
+static void B3MApplyGlassToContextMenuRoot(UIView *root)
+{
+    if (!root) return;
+
+    B3MMenuGlassView *glass = B3MRootGlassForContextMenu(root, NO);
+
+    if (!gB3MGlassMenuTint) {
+        if (glass) {
+            [glass removeFromSuperview];
+            objc_setAssociatedObject(
+                root,
+                &kB3MRootGlassMaterialKey,
+                nil,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC
+            );
+        }
+
+        B3MSuppressStockContextMenuMaterialsRecursively(root, root, NO);
+        return;
+    }
+
+    root.backgroundColor = UIColor.clearColor;
+    root.layer.backgroundColor = UIColor.clearColor.CGColor;
+
+    // Hide the visible UIKit material wherever it sits inside the live menu
+    // hierarchy. This is the key difference from the previous build, which
+    // assumed _UIElasticContextMenuBackgroundView was the compositing owner.
+    B3MSuppressStockContextMenuMaterialsRecursively(root, root, YES);
+
+    if (!glass) {
+        glass = B3MRootGlassForContextMenu(root, YES);
+    } else if (glass.superview != root) {
+        [glass removeFromSuperview];
+        [root insertSubview:glass atIndex:0];
+    }
+
+    glass.frame = root.bounds;
+
+    CGFloat radius = root.layer.cornerRadius;
+    if (radius <= 0.0) radius = 14.0;
+
+    glass.b3mPreferredRadius = radius;
+    [glass b3mRefreshMaterial];
+
+    // Keep the material below all action content even if UIKit reordered views.
+    [root sendSubviewToBack:glass];
+}
+
 %hook _UIContextMenuActionsListSeparatorView
 
 - (void)didMoveToWindow
@@ -1275,25 +1405,25 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 
 %hook _UIContextMenuView
 
+- (void)didAddSubview:(UIView *)subview
+{
+    %orig(subview);
+
+    if (gB3MGlassMenuTint &&
+        ![subview isKindOfClass:B3MMenuGlassView.class]) {
+        B3MApplyGlassToContextMenuRoot((UIView *)self);
+    }
+}
+
 - (void)didMoveToWindow
 {
     %orig;
 
     if (((UIView *)self).window) {
         B3MRefreshActiveIconColor();
-
-        /*
-         * The elastic background may have attached one layout pass earlier.
-         * Refresh it after resolving the actual pressed-app color.
-         */
-        for (UIView *subview in ((UIView *)self).subviews) {
-            if ([NSStringFromClass(subview.class)
-                    isEqualToString:@"_UIElasticContextMenuBackgroundView"]) {
-                B3MApplyGlassBackground(subview);
-            }
-        }
     }
 
+    B3MApplyGlassToContextMenuRoot((UIView *)self);
     B3MApplyBlurRecursively((UIView *)self, NO);
     B3MApplyGlassTextRecursively((UIView *)self);
 }
@@ -1301,13 +1431,32 @@ static NSArray<UIMenuElement *> *B3MFilterMenuElements(NSArray<UIMenuElement *> 
 - (void)layoutSubviews
 {
     %orig;
+    B3MApplyGlassToContextMenuRoot((UIView *)self);
     B3MApplyBlurRecursively((UIView *)self, NO);
     B3MApplyGlassTextRecursively((UIView *)self);
+}
+
+- (void)setBackgroundColor:(UIColor *)color
+{
+    if (gB3MGlassMenuTint) {
+        %orig(UIColor.clearColor);
+    } else {
+        %orig(color);
+    }
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
 {
     %orig(previousTraitCollection);
+
+    B3MMenuGlassView *glass =
+        B3MRootGlassForContextMenu((UIView *)self, NO);
+
+    if (glass) {
+        [glass b3mRefreshMaterial];
+    }
+
+    B3MApplyGlassToContextMenuRoot((UIView *)self);
     B3MApplyGlassTextRecursively((UIView *)self);
 }
 

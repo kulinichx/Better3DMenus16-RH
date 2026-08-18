@@ -88,7 +88,7 @@
 			<key>label</key>
 			<string>Glass</string>
 			<key>footerText</key>
-			<string>Liquid Glass replaces the stock menu material. App color remains a subtle accent.</string>
+			<string>Replaces the live Context Menu material using the GlassFolders-derived backdrop recipe.</string>
 		</dict>
 		<dict>
 			<key>PostNotification</key>
@@ -102,7 +102,7 @@
 			<key>key</key>
 			<string>GlassMenuTint</string>
 			<key>label</key>
-			<string>Liquid Glass</string>
+			<string>GlassFolders Material</string>
 		</dict>
 		<dict>
 			<key>PostNotification</key>
