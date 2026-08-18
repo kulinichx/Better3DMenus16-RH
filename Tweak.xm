@@ -1282,6 +1282,385 @@ static void B3MApplyGlassToContextMenuRoot(UIView *root)
     [root sendSubviewToBack:glass];
 }
 
+
+#pragma mark - Better3DMenus Context Menu Diagnostics
+
+/*
+ * Diagnostic-only code.
+ *
+ * Purpose:
+ *   - Identify the actual iOS 16.6 Context Menu compositing/background host.
+ *   - Verify the z-order of B3MMenuGlassView versus Apple's stock material.
+ *   - Inspect CABackdropLayer / CAFilter state after the menu is on screen.
+ *
+ * This does NOT modify gesture recognizers, long-press duration, menu actions,
+ * layout geometry, or material state.
+ */
+
+static char kB3MDiagnosticScheduledKey;
+static NSUInteger gB3MDiagnosticPass = 0;
+
+static id B3MDiagnosticSafeValue(id object, NSString *key)
+{
+    if (!object || key.length == 0) return nil;
+
+    @try {
+        return [object valueForKey:key];
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
+}
+
+static NSString *B3MDiagnosticClassName(id object)
+{
+    return object ? NSStringFromClass([object class]) : @"(nil)";
+}
+
+static NSString *B3MDiagnosticObjectDescription(id object)
+{
+    if (!object) return @"(nil)";
+
+    @try {
+        return [object description] ?: @"(nil)";
+    } @catch (__unused NSException *exception) {
+        return @"<description threw exception>";
+    }
+}
+
+static NSUInteger B3MDiagnosticSubviewIndex(UIView *view)
+{
+    UIView *superview = view.superview;
+    if (!superview) return NSNotFound;
+
+    return [superview.subviews indexOfObjectIdenticalTo:view];
+}
+
+static CGRect B3MDiagnosticFrameInWindow(UIView *view)
+{
+    if (!view || !view.window) return CGRectNull;
+
+    @try {
+        return [view convertRect:view.bounds toView:view.window];
+    } @catch (__unused NSException *exception) {
+        return CGRectNull;
+    }
+}
+
+static NSInteger B3MDiagnosticMaterialScore(UIView *view, UIView *menuRoot)
+{
+    if (!view) return NSIntegerMin;
+
+    NSInteger score = 0;
+
+    NSString *viewClass = NSStringFromClass(view.class);
+    NSString *layerClass = NSStringFromClass(view.layer.class);
+
+    if ([view isKindOfClass:B3MMenuGlassView.class]) score += 100;
+    if ([layerClass rangeOfString:@"Backdrop" options:NSCaseInsensitiveSearch].location != NSNotFound) score += 45;
+    if ([view isKindOfClass:UIVisualEffectView.class]) score += 30;
+
+    if ([viewClass rangeOfString:@"Background" options:NSCaseInsensitiveSearch].location != NSNotFound) score += 25;
+    if ([viewClass rangeOfString:@"Backdrop" options:NSCaseInsensitiveSearch].location != NSNotFound) score += 25;
+    if ([viewClass rangeOfString:@"Material" options:NSCaseInsensitiveSearch].location != NSNotFound) score += 25;
+    if ([viewClass rangeOfString:@"Platter" options:NSCaseInsensitiveSearch].location != NSNotFound) score += 20;
+    if ([viewClass rangeOfString:@"ContextMenu" options:NSCaseInsensitiveSearch].location != NSNotFound) score += 10;
+
+    id filters = B3MDiagnosticSafeValue(view.layer, @"filters");
+    id backgroundFilters = B3MDiagnosticSafeValue(view.layer, @"backgroundFilters");
+
+    if ([filters respondsToSelector:@selector(count)] && [filters count] > 0) score += 20;
+    if ([backgroundFilters respondsToSelector:@selector(count)] && [backgroundFilters count] > 0) score += 20;
+
+    if (view.layer.cornerRadius > 0.0) score += 3;
+    if (!view.hidden && view.alpha > 0.01 && view.layer.opacity > 0.01) score += 2;
+
+    if (menuRoot && !CGRectIsEmpty(menuRoot.bounds)) {
+        CGRect rootRect = B3MDiagnosticFrameInWindow(menuRoot);
+        CGRect viewRect = B3MDiagnosticFrameInWindow(view);
+
+        if (!CGRectIsNull(rootRect) && !CGRectIsNull(viewRect)) {
+            CGFloat rootArea = MAX(1.0, CGRectGetWidth(rootRect) * CGRectGetHeight(rootRect));
+            CGFloat viewArea = MAX(0.0, CGRectGetWidth(viewRect) * CGRectGetHeight(viewRect));
+            CGFloat ratio = viewArea / rootArea;
+
+            if (ratio >= 0.55 && ratio <= 1.40) score += 8;
+        }
+    }
+
+    return score;
+}
+
+static void B3MDiagnosticDumpLayer(CALayer *layer, NSInteger depth)
+{
+    if (!layer || depth > 10) return;
+
+    NSString *indent =
+        [@"" stringByPaddingToLength:(NSUInteger)(depth * 2)
+                          withString:@" "
+                     startingAtIndex:0];
+
+    id filters = B3MDiagnosticSafeValue(layer, @"filters");
+    id backgroundFilters = B3MDiagnosticSafeValue(layer, @"backgroundFilters");
+    id compositingFilter = B3MDiagnosticSafeValue(layer, @"compositingFilter");
+    id scale = B3MDiagnosticSafeValue(layer, @"scale");
+
+    NSLog(@"[B3M-DIAG] %@LAYER %p <%@> frame=%@ bounds=%@ opacity=%.3f hidden=%d "
+          @"corner=%.3f z=%.3f masks=%d scale=%@ filters=%@ backgroundFilters=%@ compositingFilter=%@",
+          indent,
+          layer,
+          B3MDiagnosticClassName(layer),
+          NSStringFromCGRect(layer.frame),
+          NSStringFromCGRect(layer.bounds),
+          layer.opacity,
+          layer.hidden,
+          layer.cornerRadius,
+          layer.zPosition,
+          layer.masksToBounds,
+          B3MDiagnosticObjectDescription(scale),
+          B3MDiagnosticObjectDescription(filters),
+          B3MDiagnosticObjectDescription(backgroundFilters),
+          B3MDiagnosticObjectDescription(compositingFilter));
+
+    for (CALayer *sublayer in layer.sublayers) {
+        B3MDiagnosticDumpLayer(sublayer, depth + 1);
+    }
+}
+
+static void B3MDiagnosticDumpViewTree(UIView *view,
+                                      UIView *menuRoot,
+                                      NSInteger depth)
+{
+    if (!view || depth > 16) return;
+
+    NSString *indent =
+        [@"" stringByPaddingToLength:(NSUInteger)(depth * 2)
+                          withString:@" "
+                     startingAtIndex:0];
+
+    NSInteger score = B3MDiagnosticMaterialScore(view, menuRoot);
+    NSUInteger index = B3MDiagnosticSubviewIndex(view);
+    CGRect windowFrame = B3MDiagnosticFrameInWindow(view);
+
+    BOOL wasSuppressed =
+        [objc_getAssociatedObject(view, &kB3MStockSubviewWasHiddenKey) boolValue];
+
+    NSLog(@"[B3M-DIAG] %@VIEW %p <%@> index=%@ frame=%@ windowFrame=%@ "
+          @"alpha=%.3f hidden=%d clips=%d bg=%@ "
+          @"layer=%p <%@> layerOpacity=%.3f corner=%.3f z=%.3f "
+          @"suppressedByB3M=%d score=%ld",
+          indent,
+          view,
+          NSStringFromClass(view.class),
+          index == NSNotFound ? @"-" : [NSString stringWithFormat:@"%lu", (unsigned long)index],
+          NSStringFromCGRect(view.frame),
+          CGRectIsNull(windowFrame) ? @"(no-window)" : NSStringFromCGRect(windowFrame),
+          view.alpha,
+          view.hidden,
+          view.clipsToBounds,
+          B3MDiagnosticObjectDescription(view.backgroundColor),
+          view.layer,
+          NSStringFromClass(view.layer.class),
+          view.layer.opacity,
+          view.layer.cornerRadius,
+          view.layer.zPosition,
+          wasSuppressed,
+          (long)score);
+
+    if (score >= 20 || [view isKindOfClass:B3MMenuGlassView.class]) {
+        id filters = B3MDiagnosticSafeValue(view.layer, @"filters");
+        id backgroundFilters = B3MDiagnosticSafeValue(view.layer, @"backgroundFilters");
+        id compositingFilter = B3MDiagnosticSafeValue(view.layer, @"compositingFilter");
+
+        NSLog(@"[B3M-DIAG] %@>>> MATERIAL-CANDIDATE view=%p <%@> score=%ld "
+              @"filters=%@ backgroundFilters=%@ compositingFilter=%@",
+              indent,
+              view,
+              NSStringFromClass(view.class),
+              (long)score,
+              B3MDiagnosticObjectDescription(filters),
+              B3MDiagnosticObjectDescription(backgroundFilters),
+              B3MDiagnosticObjectDescription(compositingFilter));
+
+        if ([view isKindOfClass:B3MMenuGlassView.class] ||
+            [NSStringFromClass(view.layer.class)
+                rangeOfString:@"Backdrop"
+                      options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            B3MDiagnosticDumpLayer(view.layer, depth + 1);
+        }
+    }
+
+    NSArray<UIView *> *children = view.subviews.copy;
+    for (UIView *child in children) {
+        B3MDiagnosticDumpViewTree(child, menuRoot, depth + 1);
+    }
+}
+
+static void B3MDiagnosticScanWindowCandidates(UIView *view,
+                                              UIView *menuRoot,
+                                              NSInteger depth)
+{
+    if (!view || depth > 18) return;
+
+    NSInteger score = B3MDiagnosticMaterialScore(view, menuRoot);
+
+    if (score >= 20) {
+        CGRect windowFrame = B3MDiagnosticFrameInWindow(view);
+        NSUInteger index = B3MDiagnosticSubviewIndex(view);
+
+        NSLog(@"[B3M-DIAG] WINDOW-CANDIDATE depth=%ld view=%p <%@> "
+              @"parent=%p <%@> index=%@ windowFrame=%@ "
+              @"alpha=%.3f hidden=%d layer=<%@> corner=%.3f z=%.3f score=%ld",
+              (long)depth,
+              view,
+              NSStringFromClass(view.class),
+              view.superview,
+              B3MDiagnosticClassName(view.superview),
+              index == NSNotFound ? @"-" : [NSString stringWithFormat:@"%lu", (unsigned long)index],
+              CGRectIsNull(windowFrame) ? @"(no-window)" : NSStringFromCGRect(windowFrame),
+              view.alpha,
+              view.hidden,
+              NSStringFromClass(view.layer.class),
+              view.layer.cornerRadius,
+              view.layer.zPosition,
+              (long)score);
+    }
+
+    for (UIView *child in view.subviews.copy) {
+        B3MDiagnosticScanWindowCandidates(child, menuRoot, depth + 1);
+    }
+}
+
+static void B3MDiagnosticDumpAncestorChain(UIView *root)
+{
+    NSLog(@"[B3M-DIAG] ---- ANCESTOR CHAIN ----");
+
+    UIView *cursor = root;
+    NSInteger depth = 0;
+
+    while (cursor && depth < 20) {
+        NSUInteger index = B3MDiagnosticSubviewIndex(cursor);
+
+        NSLog(@"[B3M-DIAG] ancestor[%ld] %p <%@> parent=%p <%@> index=%@ "
+              @"frame=%@ windowFrame=%@ alpha=%.3f hidden=%d layer=<%@>",
+              (long)depth,
+              cursor,
+              NSStringFromClass(cursor.class),
+              cursor.superview,
+              B3MDiagnosticClassName(cursor.superview),
+              index == NSNotFound ? @"-" : [NSString stringWithFormat:@"%lu", (unsigned long)index],
+              NSStringFromCGRect(cursor.frame),
+              CGRectIsNull(B3MDiagnosticFrameInWindow(cursor))
+                  ? @"(no-window)"
+                  : NSStringFromCGRect(B3MDiagnosticFrameInWindow(cursor)),
+              cursor.alpha,
+              cursor.hidden,
+              NSStringFromClass(cursor.layer.class));
+
+        cursor = cursor.superview;
+        depth++;
+    }
+}
+
+static void B3MDiagnosticDumpContextMenu(UIView *root, NSString *phase)
+{
+    if (!root || !root.window) return;
+
+    NSUInteger pass = ++gB3MDiagnosticPass;
+
+    NSLog(@"");
+    NSLog(@"[B3M-DIAG] ============================================================");
+    NSLog(@"[B3M-DIAG] PASS=%lu PHASE=%@ root=%p <%@> window=%p <%@>",
+          (unsigned long)pass,
+          phase ?: @"(unknown)",
+          root,
+          NSStringFromClass(root.class),
+          root.window,
+          NSStringFromClass(root.window.class));
+
+    NSLog(@"[B3M-DIAG] SETTINGS GlassMenuTint=%d GlassTextTint=%d ReduceBlur=%d "
+          @"HideSeparators=%d HideShareApp=%d HideRemoveApp=%d HideSectionGap=%d BlurFactor=%.3f",
+          gB3MGlassMenuTint,
+          gB3MGlassTextTint,
+          gB3MReduceBlur,
+          gB3MHideSeparators,
+          gB3MHideShareApp,
+          gB3MHideRemoveApp,
+          gB3MHideSectionGap,
+          gB3MBlurFactor);
+
+    B3MMenuGlassView *rootGlass =
+        B3MRootGlassForContextMenu(root, NO);
+
+    NSLog(@"[B3M-DIAG] ROOT-GLASS=%p superview=%p <%@> index=%@ frame=%@ "
+          @"layer=%p <%@> filters=%@",
+          rootGlass,
+          rootGlass.superview,
+          B3MDiagnosticClassName(rootGlass.superview),
+          rootGlass
+              ? (B3MDiagnosticSubviewIndex(rootGlass) == NSNotFound
+                    ? @"-"
+                    : [NSString stringWithFormat:@"%lu",
+                       (unsigned long)B3MDiagnosticSubviewIndex(rootGlass)])
+              : @"-",
+          rootGlass ? NSStringFromCGRect(rootGlass.frame) : @"(nil)",
+          rootGlass.layer,
+          rootGlass ? NSStringFromClass(rootGlass.layer.class) : @"(nil)",
+          rootGlass
+              ? B3MDiagnosticObjectDescription(
+                    B3MDiagnosticSafeValue(rootGlass.layer, @"filters"))
+              : @"(nil)");
+
+    B3MDiagnosticDumpAncestorChain(root);
+
+    NSLog(@"[B3M-DIAG] ---- _UIContextMenuView FULL SUBTREE ----");
+    B3MDiagnosticDumpViewTree(root, root, 0);
+
+    NSLog(@"[B3M-DIAG] ---- WINDOW MATERIAL CANDIDATES ----");
+    B3MDiagnosticScanWindowCandidates(root.window, root, 0);
+
+    NSLog(@"[B3M-DIAG] END PASS=%lu PHASE=%@", (unsigned long)pass, phase ?: @"(unknown)");
+    NSLog(@"[B3M-DIAG] ============================================================");
+    NSLog(@"");
+}
+
+static void B3MScheduleContextMenuDiagnostics(UIView *root)
+{
+    if (!root || !root.window) return;
+
+    NSNumber *alreadyScheduled =
+        objc_getAssociatedObject(root, &kB3MDiagnosticScheduledKey);
+
+    if ([alreadyScheduled boolValue]) return;
+
+    objc_setAssociatedObject(root,
+                             &kB3MDiagnosticScheduledKey,
+                             @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (root.window) {
+            B3MDiagnosticDumpContextMenu(root, @"next-runloop");
+        }
+    });
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                 (int64_t)(0.15 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (root.window) {
+            B3MDiagnosticDumpContextMenu(root, @"150ms");
+        }
+    });
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                 (int64_t)(0.40 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (root.window) {
+            B3MDiagnosticDumpContextMenu(root, @"400ms");
+        }
+    });
+}
+
+
 %hook _UIContextMenuActionsListSeparatorView
 
 - (void)didMoveToWindow
@@ -1419,13 +1798,28 @@ static void B3MApplyGlassToContextMenuRoot(UIView *root)
 {
     %orig;
 
-    if (((UIView *)self).window) {
+    UIView *root = (UIView *)self;
+
+    if (root.window) {
         B3MRefreshActiveIconColor();
+    } else {
+        /*
+         * UIKit may reuse a context-menu view instance. Allow one fresh
+         * diagnostic series the next time this root is attached.
+         */
+        objc_setAssociatedObject(root,
+                                 &kB3MDiagnosticScheduledKey,
+                                 nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 
-    B3MApplyGlassToContextMenuRoot((UIView *)self);
-    B3MApplyBlurRecursively((UIView *)self, NO);
-    B3MApplyGlassTextRecursively((UIView *)self);
+    B3MApplyGlassToContextMenuRoot(root);
+    B3MApplyBlurRecursively(root, NO);
+    B3MApplyGlassTextRecursively(root);
+
+    if (root.window) {
+        B3MScheduleContextMenuDiagnostics(root);
+    }
 }
 
 - (void)layoutSubviews
