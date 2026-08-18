@@ -1,0 +1,8 @@
+{
+    entry = {
+        bundle = Better3DMenus16RHPrefs;
+        cell = PSLinkCell;
+        detail = B3MRootListController;
+        label = Better3DMenus16-RH;
+    };
+}
