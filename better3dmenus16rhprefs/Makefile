@@ -11,5 +11,4 @@ Better3DMenus16RHPrefs_PRIVATE_FRAMEWORKS = Preferences
 Better3DMenus16RHPrefs_CFLAGS = -fobjc-arc -Wall -Wextra
 Better3DMenus16RHPrefs_INSTALL_PATH = /Library/PreferenceBundles
 Better3DMenus16RHPrefs_RESOURCE_DIRS = Resources
-
 include $(THEOS_MAKE_PATH)/bundle.mk

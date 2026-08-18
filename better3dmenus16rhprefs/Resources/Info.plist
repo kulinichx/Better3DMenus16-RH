@@ -2,23 +2,23 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
-	<key>CFBundleIdentifier</key>
-	<string>com.kulinichx.better3dmenus16rh.preferences</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>Better3DMenus16-RH</string>
-	<key>CFBundlePackageType</key>
-	<string>BNDL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>0.1.4</string>
-	<key>CFBundleVersion</key>
-	<string>5</string>
-	<key>CFBundleExecutable</key>
-	<string>Better3DMenus16RHPrefs</string>
-	<key>NSPrincipalClass</key>
-	<string>B3MRootListController</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.kulinichx.better3dmenus16rh.preferences</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Better3DMenus16-RH</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.9</string>
+    <key>CFBundleVersion</key>
+    <string>9</string>
+    <key>CFBundleExecutable</key>
+    <string>Better3DMenus16RHPrefs</string>
+    <key>NSPrincipalClass</key>
+    <string>B3MRootListController</string>
 </dict>
 </plist>

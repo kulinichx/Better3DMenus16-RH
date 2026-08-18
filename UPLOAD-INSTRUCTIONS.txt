@@ -1,0 +1,16 @@
+IMPORTANT: replace the repository as one complete version. Do not copy only Tweak.xm.
+
+Recommended with GitHub Desktop:
+1. Open Better3DMenus16-RH in GitHub Desktop.
+2. Repository -> Show in Explorer.
+3. Keep the hidden .git folder. Delete/replace the project files with everything from this package.
+4. Return to GitHub Desktop. Confirm the changed files include at least:
+   Tweak.xm
+   control
+   better3dmenus16rhprefs/Resources/Root.plist
+   better3dmenus16rhprefs/Resources/Info.plist
+   .github/workflows/build-roothide.yml
+5. Commit all changes together, then Push origin.
+6. Open GitHub Actions and run Build Better3DMenus16-RH.
+
+The workflow will reject a mixed old/new source tree before compilation.

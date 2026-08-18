@@ -1,27 +1,11 @@
-# Build / audit notes
+# Build notes — v0.1.9
 
-## Legacy Better3DMenus evidence used
+This package is intentionally self-consistent. Do not mix individual files from
+older 0.1.4–0.1.8 revisions.
 
-The supplied legacy binary contains the SpringBoard filter and the historical Share App identifier:
+The GitHub Actions workflow validates the v0.1.9 control version, preference
+keys, dynamic-color implementation, PreferenceBundle metadata, and the absence
+of the unsafe long-press hooks before compiling.
 
-- `com.apple.springboard.application-shortcut-item.share`
-
-The v0.1 filter recognizes that identifier and a conservative SpringBoard-owned variant pattern. It also has an exact-title fallback for a small set of English/Chinese Share App labels.
-
-## Safety choices
-
-- No direct ivar writes.
-- No fixed subview indexes.
-- No assert/abort paths.
-- No global long-press timing hook.
-- No menu ordering or geometry changes.
-- No widget manipulation.
-- No D1 / jailbreak runtime modifications.
-
-## v0.1.2 filter fix
-
-- Added the required top-level `Better3DMenus16RH.plist` MobileLoader/Substrate filter.
-- Filter is restricted to `com.apple.springboard`.
-- Kept the layout copy identical for packaging compatibility.
-- Workflow now validates the filter and preference plists before compiling.
-- Retains patched Theos iOS 16.5 SDK and `TARGET = iphone:clang:16.5:16.0`.
+The workflow installs `ldid` and `dpkg` explicitly and clones RootHide Theos
+directly to avoid the previous `api.github.com` install-theos failure.
