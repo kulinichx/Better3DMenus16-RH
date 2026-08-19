@@ -72,8 +72,8 @@ static void B3MPostPreferencesChanged(void)
 @property (nonatomic, strong)
     UILabel *b3mPercentLabel;
 
-@property (nonatomic, weak)
-    UISlider *b3mBoundSlider;
+@property (nonatomic, strong)
+    UISlider *b3mCustomSlider;
 
 @property (nonatomic, strong)
     UIImpactFeedbackGenerator *b3mImpactFeedback;
@@ -84,57 +84,13 @@ static void B3MPostPreferencesChanged(void)
 @property (nonatomic, assign)
     NSInteger b3mPendingDetent;
 
+@property (nonatomic, assign)
+    BOOL b3mDidLoadInitialValue;
+
 @end
 
 
 @implementation B3MPercentSliderCell
-
-- (void)b3mEnsurePercentLabel
-{
-    if (self.b3mPercentLabel) {
-        return;
-    }
-
-    UILabel *label =
-        [[UILabel alloc] initWithFrame:CGRectZero];
-
-    label.textAlignment =
-        NSTextAlignmentCenter;
-
-    label.textColor =
-        UIColor.secondaryLabelColor;
-
-    label.font =
-        [UIFont monospacedDigitSystemFontOfSize:15.0
-                                         weight:UIFontWeightSemibold];
-
-    /*
-     * Keep the percentage column visually separate without painting an
-     * opaque plate over the slider thumb/track. The slider itself is laid
-     * out to the right of this reserved column below.
-     */
-    label.backgroundColor = UIColor.clearColor;
-    label.layer.cornerRadius = 0.0;
-    label.clipsToBounds = NO;
-    label.userInteractionEnabled = NO;
-
-    [self.contentView addSubview:label];
-
-    self.b3mPercentLabel = label;
-    self.b3mLastDetent = NSIntegerMin;
-    self.b3mPendingDetent = NSIntegerMin;
-}
-
-- (UISlider *)b3mSlider
-{
-    UIControl *control = [self control];
-
-    if ([control isKindOfClass:[UISlider class]]) {
-        return (UISlider *)control;
-    }
-
-    return nil;
-}
 
 - (NSInteger)b3mDetentForValue:(float)value
 {
@@ -144,12 +100,153 @@ static void B3MPostPreferencesChanged(void)
     return MAX(0, MIN(100, detent));
 }
 
+- (double)b3mReadActiveStrength
+{
+    CFPreferencesAppSynchronize(kB3MPrefsDomain);
+
+    CFPropertyListRef value =
+        CFPreferencesCopyAppValue(
+            B3MActiveStrengthKey(),
+            kB3MPrefsDomain
+        );
+
+    double strength =
+        B3MActiveStrengthFallback();
+
+    if (value) {
+        if (CFGetTypeID(value) ==
+            CFNumberGetTypeID()) {
+
+            double number = strength;
+
+            if (CFNumberGetValue(
+                    (CFNumberRef)value,
+                    kCFNumberDoubleType,
+                    &number)) {
+                strength = number;
+            }
+        }
+
+        CFRelease(value);
+    }
+
+    return MAX(0.0, MIN(100.0, strength));
+}
+
+- (void)b3mEnsureControls
+{
+    /*
+     * PSSliderTableCell owns a private/native UISlider whose layout is
+     * recalculated by Preferences after our cell layout pass. Trying to move
+     * that control is why previous gutter fixes appeared to do nothing.
+     *
+     * Keep the Preferences cell for integration, but hide its native slider
+     * and render a dedicated UISlider whose frame is entirely ours.
+     */
+    UIControl *nativeControl = [self control];
+
+    if ([nativeControl isKindOfClass:[UISlider class]]) {
+        nativeControl.hidden = YES;
+        nativeControl.userInteractionEnabled = NO;
+    }
+
+    if (!self.b3mPercentLabel) {
+        UILabel *label =
+            [[UILabel alloc] initWithFrame:CGRectZero];
+
+        label.textAlignment = NSTextAlignmentCenter;
+        label.textColor = UIColor.secondaryLabelColor;
+        label.font =
+            [UIFont monospacedDigitSystemFontOfSize:15.0
+                                             weight:UIFontWeightSemibold];
+        label.backgroundColor = UIColor.clearColor;
+        label.userInteractionEnabled = NO;
+        label.adjustsFontSizeToFitWidth = YES;
+        label.minimumScaleFactor = 0.85;
+
+        [self.contentView addSubview:label];
+        self.b3mPercentLabel = label;
+    }
+
+    if (!self.b3mCustomSlider) {
+        UISlider *slider =
+            [[UISlider alloc] initWithFrame:CGRectZero];
+
+        slider.minimumValue = 0.0f;
+        slider.maximumValue = 100.0f;
+        slider.continuous = YES;
+        slider.accessibilityLabel = @"Strength";
+
+        [slider addTarget:self
+                   action:@selector(b3mSliderTouchDown:)
+         forControlEvents:UIControlEventTouchDown];
+
+        [slider addTarget:self
+                   action:@selector(b3mSliderChanged:)
+         forControlEvents:UIControlEventValueChanged];
+
+        [slider addTarget:self
+                   action:@selector(b3mSliderTouchEnded:)
+         forControlEvents:(
+             UIControlEventTouchUpInside |
+             UIControlEventTouchUpOutside |
+             UIControlEventTouchCancel
+         )];
+
+        [self.contentView addSubview:slider];
+        self.b3mCustomSlider = slider;
+
+        self.b3mLastDetent = NSIntegerMin;
+        self.b3mPendingDetent = NSIntegerMin;
+    }
+
+    if (!self.b3mDidLoadInitialValue &&
+        !self.b3mCustomSlider.tracking) {
+
+        float value =
+            (float)[self b3mReadActiveStrength];
+
+        self.b3mCustomSlider.value = value;
+
+        NSInteger detent =
+            [self b3mDetentForValue:value];
+
+        self.b3mLastDetent = detent;
+        self.b3mPendingDetent = detent;
+        self.b3mDidLoadInitialValue = YES;
+    }
+}
+
+- (void)b3mEnsureImpactGenerator
+{
+    if (!self.b3mImpactFeedback) {
+        self.b3mImpactFeedback =
+            [[UIImpactFeedbackGenerator alloc]
+                initWithStyle:UIImpactFeedbackStyleRigid];
+    }
+}
+
+- (void)b3mUpdatePercentLabel
+{
+    if (!self.b3mCustomSlider) {
+        self.b3mPercentLabel.text = @"";
+        return;
+    }
+
+    NSInteger detent =
+        [self b3mDetentForValue:
+            self.b3mCustomSlider.value];
+
+    self.b3mPercentLabel.text =
+        [NSString stringWithFormat:@"%ld%%",
+                                   (long)detent];
+}
+
 - (void)b3mPersistDetent:(NSInteger)detent
 {
     detent = MAX(0, MIN(100, detent));
 
-    double storedValue =
-        (double)detent;
+    double storedValue = (double)detent;
 
     CFNumberRef number =
         CFNumberCreate(
@@ -175,81 +272,6 @@ static void B3MPostPreferencesChanged(void)
     B3MPostPreferencesChanged();
 }
 
-- (void)b3mEnsureImpactGenerator
-{
-    if (!self.b3mImpactFeedback) {
-        /*
-         * Same feedback type as GlassFolders:
-         * crisp mechanical tick at each 5% threshold.
-         */
-        self.b3mImpactFeedback =
-            [[UIImpactFeedbackGenerator alloc]
-                initWithStyle:UIImpactFeedbackStyleRigid];
-    }
-}
-
-- (void)b3mBindSliderIfNeeded
-{
-    UISlider *slider =
-        [self b3mSlider];
-
-    if (!slider) {
-        return;
-    }
-
-    if (self.b3mBoundSlider != slider) {
-        if (self.b3mBoundSlider) {
-            [self.b3mBoundSlider
-                removeTarget:self
-                      action:NULL
-            forControlEvents:UIControlEventAllEvents];
-        }
-
-        self.b3mBoundSlider = slider;
-        slider.continuous = YES;
-
-        [slider addTarget:self
-                   action:@selector(b3mSliderTouchDown:)
-         forControlEvents:UIControlEventTouchDown];
-
-        [slider addTarget:self
-                   action:@selector(b3mSliderChanged:)
-         forControlEvents:UIControlEventValueChanged];
-
-        [slider addTarget:self
-                   action:@selector(b3mSliderTouchEnded:)
-         forControlEvents:(
-             UIControlEventTouchUpInside |
-             UIControlEventTouchUpOutside |
-             UIControlEventTouchCancel
-         )];
-
-        NSInteger initial =
-            [self b3mDetentForValue:slider.value];
-
-        self.b3mLastDetent = initial;
-        self.b3mPendingDetent = initial;
-    }
-}
-
-- (void)b3mUpdatePercentLabel
-{
-    UISlider *slider =
-        [self b3mSlider];
-
-    if (!slider) {
-        self.b3mPercentLabel.text = @"";
-        return;
-    }
-
-    NSInteger detent =
-        [self b3mDetentForValue:slider.value];
-
-    self.b3mPercentLabel.text =
-        [NSString stringWithFormat:@"%ld%%",
-                                   (long)detent];
-}
-
 - (void)b3mSliderTouchDown:(UISlider *)sender
 {
     NSInteger detent =
@@ -264,13 +286,6 @@ static void B3MPostPreferencesChanged(void)
 
 - (void)b3mSliderChanged:(UISlider *)sender
 {
-    /*
-     * Directly ported GlassFolders interaction:
-     * - thumb remains smooth under the finger
-     * - nearest 5% is displayed live
-     * - each crossed 5% threshold emits one crisp tick
-     * - exact magnetic settle happens only on release
-     */
     NSInteger detent =
         [self b3mDetentForValue:sender.value];
 
@@ -294,21 +309,15 @@ static void B3MPostPreferencesChanged(void)
 
 - (void)b3mSliderTouchEnded:(UISlider *)sender
 {
-    NSInteger detent =
-        self.b3mPendingDetent;
+    NSInteger detent = self.b3mPendingDetent;
 
     if (detent == NSIntegerMin) {
         detent =
             [self b3mDetentForValue:sender.value];
     }
 
-    detent =
-        MAX(0, MIN(100, detent));
+    detent = MAX(0, MIN(100, detent));
 
-    /*
-     * Same GlassFolders magnetic settle:
-     * smooth while dragging, exact 5% value on release.
-     */
     [sender setValue:(float)detent
             animated:YES];
 
@@ -322,93 +331,86 @@ static void B3MPostPreferencesChanged(void)
     self.b3mLastDetent = detent;
 }
 
+- (void)prepareForReuse
+{
+    [super prepareForReuse];
+
+    /*
+     * The same cell can become the other style after the segmented control is
+     * changed and specifiers are reloaded. Force a fresh value read then.
+     */
+    self.b3mDidLoadInitialValue = NO;
+}
+
 - (void)layoutSubviews
 {
     [super layoutSubviews];
+    [self b3mEnsureControls];
 
-    [self b3mEnsurePercentLabel];
-    [self b3mBindSliderIfNeeded];
-
-    UISlider *slider =
-        [self b3mSlider];
-
-    if (!slider) {
-        self.b3mPercentLabel.hidden = YES;
-        return;
-    }
-
-    self.b3mPercentLabel.hidden = NO;
-
-    CGRect bounds =
-        self.contentView.bounds;
+    CGRect bounds = self.contentView.bounds;
 
     /*
-     * Reserve a dedicated percentage gutter. The slider begins only after
-     * this label plus a 24pt safety gap, so its thumb can never overlap the
-     * percentage text even at the 0% / 5% end of the range.
+     * Explicit, non-overlapping columns:
+     *
+     *   | 16 | percentage 64 | 18 gap | slider ........ | 18 |
+     *
+     * The UISlider track/thumb cannot enter the percentage column because it
+     * is a separate control whose frame starts after the reserved gutter.
      */
     const CGFloat leftInset = 16.0;
-    const CGFloat valueWidth = 68.0;
-    const CGFloat gap = 24.0;
+    const CGFloat valueWidth = 64.0;
+    const CGFloat gap = 18.0;
     const CGFloat rightInset = 18.0;
+
+    CGFloat sliderX =
+        leftInset + valueWidth + gap;
+
+    CGFloat sliderWidth =
+        MAX(
+            100.0,
+            CGRectGetWidth(bounds) -
+            sliderX -
+            rightInset
+        );
+
+    CGFloat contentHeight =
+        CGRectGetHeight(bounds);
 
     self.b3mPercentLabel.frame =
         CGRectMake(
             leftInset,
-            5.0,
+            0.0,
             valueWidth,
-            MAX(
-                28.0,
-                CGRectGetHeight(bounds) - 10.0
-            )
+            contentHeight
         );
 
-    /*
-     * PSSliderTableCell may host its UISlider inside a private container,
-     * so slider.frame is not guaranteed to use contentView coordinates.
-     * Convert through contentView before applying the reserved percentage
-     * gutter. This prevents the thumb from being clipped/covered at low
-     * strength values.
-     */
-    UIView *sliderSuperview =
-        slider.superview;
+    self.b3mCustomSlider.frame =
+        CGRectMake(
+            sliderX,
+            floor((contentHeight - 44.0) * 0.5),
+            sliderWidth,
+            44.0
+        );
 
-    if (sliderSuperview) {
-        CGRect sliderInContent =
-            [sliderSuperview convertRect:slider.frame
-                                   toView:self.contentView];
-
-        CGFloat sliderX =
-            leftInset +
-            valueWidth +
-            gap;
-
-        sliderInContent.origin.x =
-            sliderX;
-
-        sliderInContent.size.width =
-            MAX(
-                120.0,
-                CGRectGetWidth(bounds) -
-                sliderX -
-                rightInset
-            );
-
-        slider.frame =
-            [self.contentView convertRect:sliderInContent
-                                   toView:sliderSuperview];
-
-        /*
-         * Preferences containers vary slightly across iOS builds. Do not
-         * allow a parent container to cut the circular UISlider thumb.
-         */
-        slider.clipsToBounds = NO;
-        sliderSuperview.clipsToBounds = NO;
-        self.contentView.clipsToBounds = NO;
-    }
+    self.b3mPercentLabel.hidden = NO;
+    self.b3mCustomSlider.hidden = NO;
 
     [self.contentView
+        bringSubviewToFront:self.b3mCustomSlider];
+    [self.contentView
         bringSubviewToFront:self.b3mPercentLabel];
+
+    if (!self.b3mCustomSlider.tracking) {
+        /*
+         * Keep the visible value in sync after Clear/Liquid specifier reloads.
+         */
+        float activeValue =
+            (float)[self b3mReadActiveStrength];
+
+        if (fabsf(self.b3mCustomSlider.value - activeValue) > 0.01f) {
+            self.b3mCustomSlider.value = activeValue;
+        }
+    }
 
     [self b3mUpdatePercentLabel];
 }
