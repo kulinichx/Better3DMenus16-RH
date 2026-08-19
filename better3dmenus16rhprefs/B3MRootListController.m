@@ -343,11 +343,13 @@ static void B3MPostPreferencesChanged(void)
         self.contentView.bounds;
 
     /*
-     * GlassFolders percentage column geometry.
+     * Reserve a dedicated percentage gutter. The slider begins only after
+     * this label plus a 24pt safety gap, so its thumb can never overlap the
+     * percentage text even at the 0% / 5% end of the range.
      */
-    const CGFloat leftInset = 14.0;
-    const CGFloat valueWidth = 64.0;
-    const CGFloat gap = 18.0;
+    const CGFloat leftInset = 16.0;
+    const CGFloat valueWidth = 68.0;
+    const CGFloat gap = 24.0;
     const CGFloat rightInset = 18.0;
 
     self.b3mPercentLabel.frame =
