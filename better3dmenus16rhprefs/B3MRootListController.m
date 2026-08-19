@@ -352,14 +352,14 @@ static void B3MPostPreferencesChanged(void)
     /*
      * Explicit, non-overlapping columns:
      *
-     *   | 16 | percentage 64 | 18 gap | slider ........ | 18 |
+     *   | 16 | percentage 48 | 12 gap | slider ........ | 18 |
      *
      * The UISlider track/thumb cannot enter the percentage column because it
      * is a separate control whose frame starts after the reserved gutter.
      */
     const CGFloat leftInset = 16.0;
-    const CGFloat valueWidth = 64.0;
-    const CGFloat gap = 18.0;
+    const CGFloat valueWidth = 48.0;
+    const CGFloat gap = 12.0;
     const CGFloat rightInset = 18.0;
 
     CGFloat sliderX =
@@ -615,10 +615,31 @@ static void B3MPostPreferencesChanged(void)
         }
 
         /*
-         * Recreate the single strength row so it immediately reads the
-         * selected style's own saved value.
+         * Do NOT reload the whole specifier array here. Root.plist contains
+         * "Liquid Glass Strength" as the initial group label, so a full
+         * reload would immediately overwrite the dynamic Clear label.
+         *
+         * Refresh only the two affected rows using the already-mutated
+         * specifier objects.
          */
-        [self reloadSpecifiers];
+        PSSpecifier *labelSpecifier =
+            [self b3mSpecifierWithIdentifier:
+                @"ActiveStrengthLabel"];
+
+        if (labelSpecifier) {
+            [self reloadSpecifier:labelSpecifier
+                         animated:NO];
+        }
+
+        PSSpecifier *sliderSpecifier =
+            [self b3mSpecifierWithIdentifier:
+                @"ActiveStrengthSlider"];
+
+        if (sliderSpecifier) {
+            [self reloadSpecifier:sliderSpecifier
+                         animated:NO];
+        }
+
         B3MPostPreferencesChanged();
     }
 }
