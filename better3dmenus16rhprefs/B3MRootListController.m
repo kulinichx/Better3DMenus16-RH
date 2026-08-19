@@ -109,14 +109,13 @@ static void B3MPostPreferencesChanged(void)
                                          weight:UIFontWeightSemibold];
 
     /*
-     * Exact GlassFolders layout idea:
-     * opaque dynamic badge masks Preferences' internal track beneath it.
+     * Keep the percentage column visually separate without painting an
+     * opaque plate over the slider thumb/track. The slider itself is laid
+     * out to the right of this reserved column below.
      */
-    label.backgroundColor =
-        UIColor.secondarySystemGroupedBackgroundColor;
-
-    label.layer.cornerRadius = 7.0;
-    label.clipsToBounds = YES;
+    label.backgroundColor = UIColor.clearColor;
+    label.layer.cornerRadius = 0.0;
+    label.clipsToBounds = NO;
     label.userInteractionEnabled = NO;
 
     [self.contentView addSubview:label];
@@ -362,24 +361,49 @@ static void B3MPostPreferencesChanged(void)
             )
         );
 
-    CGRect sliderFrame =
-        slider.frame;
+    /*
+     * PSSliderTableCell may host its UISlider inside a private container,
+     * so slider.frame is not guaranteed to use contentView coordinates.
+     * Convert through contentView before applying the reserved percentage
+     * gutter. This prevents the thumb from being clipped/covered at low
+     * strength values.
+     */
+    UIView *sliderSuperview =
+        slider.superview;
 
-    sliderFrame.origin.x =
-        leftInset +
-        valueWidth +
-        gap;
+    if (sliderSuperview) {
+        CGRect sliderInContent =
+            [sliderSuperview convertRect:slider.frame
+                                   toView:self.contentView];
 
-    sliderFrame.size.width =
-        MAX(
-            120.0,
-            CGRectGetWidth(bounds) -
-            sliderFrame.origin.x -
-            rightInset
-        );
+        CGFloat sliderX =
+            leftInset +
+            valueWidth +
+            gap;
 
-    slider.frame =
-        sliderFrame;
+        sliderInContent.origin.x =
+            sliderX;
+
+        sliderInContent.size.width =
+            MAX(
+                120.0,
+                CGRectGetWidth(bounds) -
+                sliderX -
+                rightInset
+            );
+
+        slider.frame =
+            [self.contentView convertRect:sliderInContent
+                                   toView:sliderSuperview];
+
+        /*
+         * Preferences containers vary slightly across iOS builds. Do not
+         * allow a parent container to cut the circular UISlider thumb.
+         */
+        slider.clipsToBounds = NO;
+        sliderSuperview.clipsToBounds = NO;
+        self.contentView.clipsToBounds = NO;
+    }
 
     [self.contentView
         bringSubviewToFront:self.b3mPercentLabel];
@@ -513,7 +537,7 @@ static void B3MPostPreferencesChanged(void)
     B3MPostPreferencesChanged();
 }
 
-- (void)b3mUpdateActiveStrengthLabel
+- (void)b3mUpdateActiveStrengthLabelForStyle:(NSInteger)style
 {
     PSSpecifier *labelSpecifier =
         [self b3mSpecifierWithIdentifier:
@@ -524,12 +548,18 @@ static void B3MPostPreferencesChanged(void)
     }
 
     NSString *label =
-        B3MCurrentGlassStyle() == 0
+        style == 0
             ? @"Clear Strength"
             : @"Liquid Glass Strength";
 
     [labelSpecifier setProperty:label
                         forKey:@"label"];
+}
+
+- (void)b3mUpdateActiveStrengthLabel
+{
+    [self b3mUpdateActiveStrengthLabelForStyle:
+        B3MCurrentGlassStyle()];
 }
 
 - (void)setPreferenceValue:(id)value
@@ -542,13 +572,50 @@ static void B3MPostPreferencesChanged(void)
         [specifier propertyForKey:@"key"];
 
     if ([key isEqualToString:@"GlassStyle"]) {
-        [self b3mUpdateActiveStrengthLabel];
+        NSInteger style =
+            [value respondsToSelector:@selector(integerValue)]
+                ? [value integerValue]
+                : B3MCurrentGlassStyle();
+
+        style = (style == 0) ? 0 : 1;
 
         /*
-         * Recreate the single strength row so the native slider requests
-         * the newly selected style's saved value.
+         * Use the segment's new value directly for the visible heading.
+         * This avoids a one-step stale CFPreferences read while the
+         * Preferences framework is still committing the segment change.
+         */
+        [self b3mUpdateActiveStrengthLabelForStyle:style];
+
+        long long storedStyle =
+            (long long)style;
+
+        CFNumberRef styleNumber =
+            CFNumberCreate(
+                kCFAllocatorDefault,
+                kCFNumberLongLongType,
+                &storedStyle
+            );
+
+        if (styleNumber) {
+            CFPreferencesSetAppValue(
+                CFSTR("GlassStyle"),
+                styleNumber,
+                kB3MPrefsDomain
+            );
+
+            CFPreferencesAppSynchronize(
+                kB3MPrefsDomain
+            );
+
+            CFRelease(styleNumber);
+        }
+
+        /*
+         * Recreate the single strength row so it immediately reads the
+         * selected style's own saved value.
          */
         [self reloadSpecifiers];
+        B3MPostPreferencesChanged();
     }
 }
 
